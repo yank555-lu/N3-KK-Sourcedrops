@@ -22,7 +22,7 @@
 /* Slave address should be shifted to the right 1bit.
  * R/W bit should NOT be included.
  */
-#define SMB358_I2C_SLAVEADDR	(0xD4 >> 1)
+#define SEC_CHARGER_I2C_SLAVEADDR	(0xD4 >> 1)
 
 /* Register define */
 #define SMB358_CHARGE_CURRENT				0x00
@@ -62,20 +62,4 @@
 #define SMB358_DISABLE_WRITE				0
 
 #define SMB358_ENABLE_CHARGER				0x02
-
-ssize_t smb358_chg_show_attrs(struct device *dev,
-				struct device_attribute *attr, char *buf);
-
-ssize_t smb358_chg_store_attrs(struct device *dev,
-				struct device_attribute *attr,
-				const char *buf, size_t count);
-
-#define SMB358_CHARGER_ATTR(_name)				\
-{							\
-	.attr = {.name = #_name, .mode = 0664},	\
-	.show = smb358_chg_show_attrs,			\
-	.store = smb358_chg_store_attrs,			\
-}
-
 #endif	/* __SMB358_CHARGER_H */
-

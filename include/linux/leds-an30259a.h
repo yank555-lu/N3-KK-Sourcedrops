@@ -80,6 +80,4 @@ struct an30259a_pr_control {
 #define AN30259A_PR_SET_LED	_IOW('S', 42, struct an30259a_pr_control)
 #define AN30259A_PR_SET_LEDS	_IOW('S', 43, struct an30259a_pr_control[3])
 #define AN30259A_PR_SET_IMAX	_IOW('S', 44, __u8)
-
-extern struct class *sec_class;
 #endif						/* _LEDS_AN30259A_H */

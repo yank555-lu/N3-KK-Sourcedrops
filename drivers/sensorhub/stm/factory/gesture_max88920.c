@@ -17,7 +17,6 @@
 #define	VENDOR		"MAXIM"
 #define	CHIP_ID		"MAX88920"
 
-
 static ssize_t gestrue_vendor_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
@@ -46,33 +45,38 @@ static ssize_t gesture_get_selftest_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
 	s16 raw_A = 0, raw_B = 0, raw_C = 0, raw_D = 0;
-	int iRet = 0;
-	char chTempBuf[4] = { 0, };
+	int iDelayCnt = 0, iRet = 0;
+	char chTempBuf[2] = { 0, 10 };
 	struct ssp_data *data = dev_get_drvdata(dev);
 
-	struct ssp_msg *msg = kzalloc(sizeof(*msg), GFP_KERNEL);
-	msg->cmd = GESTURE_FACTORY;
-	msg->length = 4;
-	msg->options = AP2HUB_READ;
-	msg->buffer = chTempBuf;
-	msg->free_buffer = 0;
+	iDelayCnt = 0;
+	data->uFactorydataReady = 0;
+	memset(data->uFactorydata, 0, sizeof(char) * FACTORY_DATA_MAX);
 
-	iRet = ssp_spi_sync(data, msg, 2000);
+	iRet = send_instruction(data, FACTORY_MODE, GESTURE_FACTORY,
+			chTempBuf, 2);
 
-	if (iRet != SUCCESS) {
+	while (!(data->uFactorydataReady & (1 << GESTURE_FACTORY))
+		&& (iDelayCnt++ < 100)
+		&& (iRet == SUCCESS))
+		msleep(20);
+
+	if ((iDelayCnt >= 100) || (iRet != SUCCESS)) {
 		pr_err("[SSP]: %s - Gesture Selftest Timeout!!\n", __func__);
 		goto exit;
 	}
 
-	raw_A = chTempBuf[0];
-	raw_B = chTempBuf[1];
-	raw_C = chTempBuf[2];
-	raw_D = chTempBuf[3];
+	raw_A = data->uFactorydata[0];
+	raw_B = data->uFactorydata[1];
+	raw_C = data->uFactorydata[2];
+	raw_D = data->uFactorydata[3];
 
 	pr_info("[SSP] %s: self test A = %d, B = %d, C = %d, D = %d\n",
 		__func__, raw_A, raw_B, raw_C, raw_D);
 
-	exit: return sprintf(buf, "%d,%d,%d,%d\n", raw_A, raw_B, raw_C, raw_D);
+exit:
+	return sprintf(buf, "%d,%d,%d,%d\n",
+            raw_A, raw_B, raw_C, raw_D);
 }
 
 static ssize_t ir_current_show(struct device *dev,
@@ -106,7 +110,7 @@ static ssize_t ir_current_store(struct device *dev,
 			}	
 		}
 		set_gesture_current(data, data->uIr_Current);
-		data->uIr_Current= uNewIrCurrent;
+		data->uIr_Current = uNewIrCurrent;
 	}
 
 	ssp_dbg("[SSP]: %s - new Ir_Current Setting : %d\n",
@@ -120,7 +124,7 @@ static DEVICE_ATTR(name, S_IRUGO, gestrue_name_show, NULL);
 static DEVICE_ATTR(raw_data, S_IRUGO, raw_data_read, NULL);
 static DEVICE_ATTR(selftest, S_IRUGO, gesture_get_selftest_show, NULL);
 static DEVICE_ATTR(ir_current, S_IRUGO | S_IWUSR | S_IWGRP,
-	ir_current_show, ir_current_store);
+    ir_current_show, ir_current_store);
 
 static struct device_attribute *gesture_attrs[] = {
 	&dev_attr_vendor,

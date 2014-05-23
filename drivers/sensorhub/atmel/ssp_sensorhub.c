@@ -70,44 +70,7 @@ static ssize_t ssp_sensorhub_write(struct file *file, const char __user *buf,
 		instruction = REMOVE_LIBRARY;
 	else if (buf[0] == MSG2SSP_INST_LIBRARY_ADD)
 		instruction = ADD_LIBRARY;
-	else if (buf[0] == MSG2SSP_INST_LIB_NOTI) {
-		if (buf[2] == MSG2SSP_AP_STATUS_WAKEUP) {
-			ret = ssp_send_cmd(hub_data->ssp_data, MSG2SSP_AP_STATUS_WAKEUP);
-			enable_debug_timer(hub_data->ssp_data);
-			if (ret != SUCCESS)
-				pr_err("[SSP] : %s MSG2SSP_AP_STATUS_WAKEUP failed(%d)\n",
-					__func__, ret);
-		} else if (buf[2] == MSG2SSP_AP_STATUS_SLEEP) {
-			disable_debug_timer(hub_data->ssp_data);
-			ret = ssp_send_cmd(hub_data->ssp_data, MSG2SSP_AP_STATUS_SLEEP);
-			if (ret != SUCCESS)
-				pr_err("[SSP] : %s MSG2SSP_AP_STATUS_SLEEP failed(%d)\n",
-					__func__, ret);
-		} else if (buf[2] == MSG2SSP_AP_STATUS_POW_CONNECTED) {
-			ret = ssp_send_cmd(hub_data->ssp_data, MSG2SSP_AP_STATUS_POW_CONNECTED);
-			if (ret != SUCCESS)
-				pr_err("[SSP] : %s MSG2SSP_AP_STATUS_POW_CONNECTED failed(%d)\n",
-					__func__, ret);
-		} else if (buf[2] == MSG2SSP_AP_STATUS_POW_DISCONNECTED) {
-			ret = ssp_send_cmd(hub_data->ssp_data, MSG2SSP_AP_STATUS_POW_DISCONNECTED);
-			if (ret != SUCCESS)
-				pr_err("[SSP] : %s MSG2SSP_AP_STATUS_POW_DISCONNECTED failed(%d)\n",
-					__func__, ret);
-		} else if (buf[2] == MSG2SSP_AP_STATUS_CALL_IDLE) {
-			ret = ssp_send_cmd(hub_data->ssp_data, MSG2SSP_AP_STATUS_CALL_IDLE);
-			if (ret != SUCCESS)
-				pr_err("[SSP] : %s MSG2SSP_AP_STATUS_CALL_IDLE failed(%d)\n",
-					__func__, ret);
-		} else if (buf[2] == MSG2SSP_AP_STATUS_CALL_ACTIVE) {
-			ret = ssp_send_cmd(hub_data->ssp_data, MSG2SSP_AP_STATUS_CALL_ACTIVE);
-			if (ret != SUCCESS)
-				pr_err("[SSP] : %s MSG2SSP_AP_STATUS_CALL_ACTIVE failed(%d)\n",
-					__func__, ret);
-		} else
-			pr_err("[SSP] : %s wrong MSG2SSP_INST_LIB_NOTI(%d)\n",
-					__func__, buf[0]);
-		return count;
-	} else
+	else
 		instruction = buf[0];
 
 	ret = send_instruction(hub_data->ssp_data, instruction,

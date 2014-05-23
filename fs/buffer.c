@@ -29,7 +29,7 @@
 #include <linux/file.h>
 #include <linux/quotaops.h>
 #include <linux/highmem.h>
-#include <linux/export.h>
+#include <linux/module.h>
 #include <linux/writeback.h>
 #include <linux/hash.h>
 #include <linux/suspend.h>
@@ -38,9 +38,11 @@
 #include <linux/bio.h>
 #include <linux/notifier.h>
 #include <linux/cpu.h>
+#include <linux/smp.h>
 #include <linux/bitops.h>
 #include <linux/mpage.h>
 #include <linux/bit_spinlock.h>
+#include <linux/cleancache.h>
 
 static int fsync_buffers_list(spinlock_t *lock, struct list_head *list);
 
@@ -212,16 +214,13 @@ __find_get_block_slow(struct block_device *bdev, sector_t block)
 	 * elsewhere, don't buffer_error if we had some unmapped buffers
 	 */
 	if (all_mapped) {
-		char b[BDEVNAME_SIZE];
-
 		printk("__find_get_block_slow() failed. "
 			"block=%llu, b_blocknr=%llu\n",
 			(unsigned long long)block,
 			(unsigned long long)bh->b_blocknr);
 		printk("b_state=0x%08lx, b_size=%zu\n",
 			bh->b_state, bh->b_size);
-		printk("device %s blocksize: %d\n", bdevname(bdev, b),
-			1 << bd_inode->i_blkbits);
+		printk("device blocksize: %d\n", 1 << bd_inode->i_blkbits);
 	}
 out_unlock:
 	spin_unlock(&bd_mapping->private_lock);
@@ -229,6 +228,55 @@ out_unlock:
 out:
 	return ret;
 }
+
+/* If invalidate_buffers() will trash dirty buffers, it means some kind
+   of fs corruption is going on. Trashing dirty data always imply losing
+   information that was supposed to be just stored on the physical layer
+   by the user.
+
+   Thus invalidate_buffers in general usage is not allwowed to trash
+   dirty buffers. For example ioctl(FLSBLKBUF) expects dirty data to
+   be preserved.  These buffers are simply skipped.
+  
+   We also skip buffers which are still in use.  For example this can
+   happen if a userspace program is reading the block device.
+
+   NOTE: In the case where the user removed a removable-media-disk even if
+   there's still dirty data not synced on disk (due a bug in the device driver
+   or due an error of the user), by not destroying the dirty buffers we could
+   generate corruption also on the next media inserted, thus a parameter is
+   necessary to handle this case in the most safe way possible (trying
+   to not corrupt also the new disk inserted with the data belonging to
+   the old now corrupted disk). Also for the ramdisk the natural thing
+   to do in order to release the ramdisk memory is to destroy dirty buffers.
+
+   These are two special cases. Normal usage imply the device driver
+   to issue a sync on the device (without waiting I/O completion) and
+   then an invalidate_buffers call that doesn't trash dirty buffers.
+
+   For handling cache coherency with the blkdev pagecache the 'update' case
+   is been introduced. It is needed to re-read from disk any pinned
+   buffer. NOTE: re-reading from disk is destructive so we can do it only
+   when we assume nobody is changing the buffercache under our I/O and when
+   we think the disk contains more recent information than the buffercache.
+   The update == 1 pass marks the buffers we need to update, the update == 2
+   pass does the actual I/O. */
+void invalidate_bdev(struct block_device *bdev)
+{
+	struct address_space *mapping = bdev->bd_inode->i_mapping;
+
+	if (mapping->nrpages == 0)
+		return;
+
+	invalidate_bh_lrus();
+	lru_add_drain_all();	/* make sure all lru add caches are flushed */
+	invalidate_mapping_pages(mapping, 0, -1);
+	/* 99% of the time, we don't need to flush the cleancache on the bdev.
+	 * But, for the strange corners, lets be cautious
+	 */
+	cleancache_flush_inode(mapping);
+}
+EXPORT_SYMBOL(invalidate_bdev);
 
 /*
  * Kick the writeback threads then try to free up some ZONE_NORMAL memory.
@@ -238,7 +286,7 @@ static void free_more_memory(void)
 	struct zone *zone;
 	int nid;
 
-	wakeup_flusher_threads(1024, WB_REASON_FREE_MORE_MEM);
+	wakeup_flusher_threads(1024);
 	yield();
 
 	for_each_online_node(nid) {
@@ -921,7 +969,6 @@ init_page_buffers(struct page *page, struct block_device *bdev,
 	struct buffer_head *head = page_buffers(page);
 	struct buffer_head *bh = head;
 	int uptodate = PageUptodate(page);
-	sector_t end_block = blkdev_max_block(I_BDEV(bdev->bd_inode));
 
 	do {
 		if (!buffer_mapped(bh)) {
@@ -930,8 +977,7 @@ init_page_buffers(struct page *page, struct block_device *bdev,
 			bh->b_blocknr = block;
 			if (uptodate)
 				set_buffer_uptodate(bh);
-			if (block < end_block)
-				set_buffer_mapped(bh);
+			set_buffer_mapped(bh);
 		}
 		block++;
 		bh = bh->b_this_page;
@@ -951,8 +997,13 @@ grow_dev_page(struct block_device *bdev, sector_t block,
 	struct page *page;
 	struct buffer_head *bh;
 
+#ifdef CONFIG_DMA_CMA
+	page = find_or_create_page(inode->i_mapping, index,
+		(mapping_gfp_mask(inode->i_mapping) & ~__GFP_FS));
+#else
 	page = find_or_create_page(inode->i_mapping, index,
 		(mapping_gfp_mask(inode->i_mapping) & ~__GFP_FS)|__GFP_MOVABLE);
+#endif
 	if (!page)
 		return NULL;
 
@@ -987,6 +1038,7 @@ grow_dev_page(struct block_device *bdev, sector_t block,
 	return page;
 
 failed:
+	BUG();
 	unlock_page(page);
 	page_cache_release(page);
 	return NULL;
@@ -1224,6 +1276,16 @@ static void bh_lru_install(struct buffer_head *bh)
 {
 	struct buffer_head *evictee = NULL;
 
+#ifdef CONFIG_DMA_CMA
+	/*
+	 * Pages are busy when their buffers stay on bh_lru list.
+	 * The CMA pages are expected to be migrated at any time,
+	 * therefore they should never go on any local LRU lists.
+	 */
+	if (is_cma_pageblock(bh->b_page))
+		return;
+#endif
+
 	check_irqs_on();
 	bh_lru_lock();
 	if (__this_cpu_read(bh_lrus.bhs[0]) != bh) {
@@ -1385,21 +1447,15 @@ static void invalidate_bh_lru(void *arg)
 	}
 	put_cpu_var(bh_lrus);
 }
-
-static bool has_bh_in_lru(int cpu, void *dummy)
-{
-	struct bh_lru *b = per_cpu_ptr(&bh_lrus, cpu);
-	int i;
 	
-	for (i = 0; i < BH_LRU_SIZE; i++) {
-		if (b->bhs[i])
-			return 1;
-	}
-
-	return 0;
+void invalidate_bh_lrus(void)
+{
+	on_each_cpu(invalidate_bh_lru, NULL, 1);
 }
+EXPORT_SYMBOL_GPL(invalidate_bh_lrus);
 
-static void __evict_bh_lru(void *arg)
+#ifdef CONFIG_DMA_CMA
+static void evict_bh_lru(void *arg)
 {
 	struct bh_lru *b = &get_cpu_var(bh_lrus);
 	struct buffer_head *bh = arg;
@@ -1407,39 +1463,24 @@ static void __evict_bh_lru(void *arg)
 
 	for (i = 0; i < BH_LRU_SIZE; i++) {
 		if (b->bhs[i] == bh) {
+			printk(KERN_INFO "%s[%d] drop buffer head %p.\n",
+				__func__, __LINE__, b->bhs[i]);
 			brelse(b->bhs[i]);
 			b->bhs[i] = NULL;
-			goto out;
+			break;
 		}
 	}
-out:
+
 	put_cpu_var(bh_lrus);
 }
 
-static bool bh_exists_in_lru(int cpu, void *arg)
-{
-	struct bh_lru *b = per_cpu_ptr(&bh_lrus, cpu);
-	struct buffer_head *bh = arg;
-	int i;
-
-	for (i = 0; i < BH_LRU_SIZE; i++) {
-		if (b->bhs[i] == bh)
-			return 1;
-	}
-
-	return 0;
-
-}
-void invalidate_bh_lrus(void)
-{
-	on_each_cpu_cond(has_bh_in_lru, invalidate_bh_lru, NULL, 1, GFP_KERNEL);
-}
-EXPORT_SYMBOL_GPL(invalidate_bh_lrus);
-
 void evict_bh_lrus(struct buffer_head *bh)
 {
-	on_each_cpu_cond(bh_exists_in_lru, __evict_bh_lru, bh, 1, GFP_ATOMIC);
+	on_each_cpu(evict_bh_lru, bh, 1);
 }
+#else
+static inline void evict_bh_lrus(struct buffer_head *bh) {}
+#endif
 EXPORT_SYMBOL_GPL(evict_bh_lrus);
 
 void set_bh_page(struct buffer_head *bh,
@@ -1474,13 +1515,13 @@ static void discard_buffer(struct buffer_head * bh)
 }
 
 /**
- * block_invalidatepage - invalidate part or all of a buffer-backed page
+ * block_invalidatepage - invalidate part of all of a buffer-backed page
  *
  * @page: the page which is affected
  * @offset: the index of the truncation point
  *
  * block_invalidatepage() is called when all or part of the page has become
- * invalidated by a truncate operation.
+ * invalidatedby a truncate operation.
  *
  * block_invalidatepage() does not have to release all buffers, but it must
  * ensure that no dirty buffer is left outside @offset and that no I/O
@@ -3089,17 +3130,11 @@ drop_buffers(struct page *page, struct buffer_head **buffers_to_free)
 
 	bh = head;
 	do {
+		evict_bh_lrus(bh);
 		if (buffer_write_io_error(bh) && page->mapping)
 			set_bit(AS_EIO, &page->mapping->flags);
-		if (buffer_busy(bh)) {
-			/*
-			 * Check if the busy failure was due to an
-			 * outstanding LRU reference
-			 */
-			evict_bh_lrus(bh);
-			if (buffer_busy(bh))
-				goto failed;
-		}
+		if (buffer_busy(bh))
+			goto failed;
 		bh = bh->b_this_page;
 	} while (bh != head);
 

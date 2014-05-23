@@ -2,32 +2,23 @@
 # Misc strange devices
 #
 
-menu "Misc devices"
-
-config SEC_FPGA_ICE40XX
-	tristate "this feature allows FPGA_ICE40XX"
-	default n
-	help
-	  This is a driver for IR LEd driver based on Lattice chip.
-	  Lattice FPGA can support IR LED.
-	  To compile this driver as a module, choose M here.
-	  If unsure, say N.
-
-config IR_REMOCON_FPGA
-	tristate "this feature allows IR LED"
-	depends on SEC_FPGA_ICE40XX
-	default n
-	help
-	  This is a driver for IR LED driver based on Lattice chip.
-	  Lattice FPGA can support IR LED.
-	  To compile this driver as a module, choose M here.
-	  If unsure, say N.
-
+# This one has to live outside of the MISC_DEVICES conditional,
+# because it may be selected by drivers/platform/x86/hp_accel.
 config SENSORS_LIS3LV02D
 	tristate
 	depends on INPUT
 	select INPUT_POLLDEV
 	default n
+
+menuconfig MISC_DEVICES
+	bool "Misc devices"
+	---help---
+	  Say Y here to get to see options for device drivers from various
+	  different categories. This option alone does not add any kernel code.
+
+	  If you say N, all options in this submenu will be skipped and disabled.
+
+if MISC_DEVICES
 
 config AD525X_DPOT
 	tristate "Analog Devices Digital Potentiometers"
@@ -50,38 +41,6 @@ config AD525X_DPOT
 	  This driver can also be built as a module.  If so, the module
 	  will be called ad525x_dpot.
 
-config MUIC_MAX77803_SUPPORT_MHL_CABLE_DETECTION
-	  bool "MUIC_MAX77803_SUPPORT_MHL_CABLE_DETECTION"
-	  depends on MFD_MAX77803
-	  default y
-	  help
-	  If you say yes here you will get support for the MHL cable
-	  detection.
-
-config MUIC_MAX77804K_SUPPORT_MHL_CABLE_DETECTION
-	  bool "MUIC_MAX77804K_SUPPORT_MHL_CABLE_DETECTION"
-	  depends on MFD_MAX77804K
-	  default y
-	  help
-	  If you say yes here you will get support for the MHL cable
-	  detection.
-
-config MUIC_MAX77888_SUPPORT_MHL_CABLE_DETECTION
-	  bool "MUIC_MAX77888_SUPPORT_MHL_CABLE_DETECTION"
-	  depends on MFD_MAX77888
-	  default y
-	  help
-	  If you say yes here you will get support for the MHL cable
-	  detection.
-
-config MUIC_MAX77804K_SUPPORT_HMT_DETECTION
-	  bool "MUIC_MAX77804K_SUPPORT_HMT_DETECTION"
-	  depends on MFD_MAX77804K
-	  default n
-	  help
-	  If you say yes here you will get support for the HMT
-	  detection.
-
 config AD525X_DPOT_I2C
 	tristate "support I2C bus connection"
 	depends on AD525X_DPOT && I2C
@@ -102,12 +61,33 @@ config AD525X_DPOT_SPI
 	  To compile this driver as a module, choose M here: the
 	  module will be called ad525x_dpot-spi.
 
+config ANDROID_PMEM
+	bool "Android pmem allocator"
+	depends on MACH_U1 || MACH_PX || MACH_TRATS
+	default n
+
+if ANDROID_PMEM
+	comment "Reserved memory configurations"
+
+config ANDROID_PMEM_MEMSIZE_PMEM
+	int "Memory size in kbytes for android surface using pmem"
+	default "4096"
+
+config ANDROID_PMEM_MEMSIZE_PMEM_GPU1
+	int "Memory size in kbytes for android surface using pmem_gpu1"
+	default "10240"
+
+config ANDROID_PMEM_MEMSIZE_PMEM_CAM
+	int "Memory size in kbytes for android camera using pmem_camera"
+	default "4096"
+endif
+
 config ATMEL_PWM
 	tristate "Atmel AT32/AT91 PWM support"
-	depends on HAVE_CLK
+	depends on AVR32 || ARCH_AT91SAM9263 || ARCH_AT91SAM9RL || ARCH_AT91CAP9
 	help
 	  This option enables device driver support for the PWM channels
-	  on certain Atmel processors.  Pulse Width Modulation is used for
+	  on certain Atmel processors.	Pulse Width Modulation is used for
 	  purposes including software controlled power-efficient backlights
 	  on LCD displays, motor control, and waveform generation.
 
@@ -187,7 +167,6 @@ config PHANTOM
 
 config INTEL_MID_PTI
 	tristate "Parallel Trace Interface for MIPI P1149.7 cJTAG standard"
-	depends on PCI
 	default n
 	help
 	  The PTI (Parallel Trace Interface) driver directs
@@ -406,14 +385,14 @@ config SENSORS_BH1780
 	  will be called bh1780gli.
 
 config SENSORS_BH1770
-         tristate "BH1770GLC / SFH7770 combined ALS - Proximity sensor"
-         depends on I2C
-         ---help---
-           Say Y here if you want to build a driver for BH1770GLC (ROHM) or
+	 tristate "BH1770GLC / SFH7770 combined ALS - Proximity sensor"
+	 depends on I2C
+	 ---help---
+	   Say Y here if you want to build a driver for BH1770GLC (ROHM) or
 	   SFH7770 (Osram) combined ambient light and proximity sensor chip.
 
-           To compile this driver as a module, choose M here: the
-           module will be called bh1770glc. If unsure, say N here.
+	   To compile this driver as a module, choose M here: the
+	   module will be called bh1770glc. If unsure, say N here.
 
 config SENSORS_APDS990X
 	 tristate "APDS990X combined als and proximity sensors"
@@ -425,17 +404,6 @@ config SENSORS_APDS990X
 
 	   To compile this driver as a module, choose M here: the
 	   module will be called apds990x. If unsure, say N here.
-
-config SAMSUNG_JACK
-	bool "3.5 PI Jack driver for Samsung devices"
-	depends on INPUT
-	default n
-	help
-	 This is 3.5 PI JACK driver for Samsung devies.
-	 sec_jack from samsung driver used for samsung devices.
-
-	 To samsung jack is reviewed and supported in all the
-	 samsung devices.
 
 config HMC6352
 	tristate "Honeywell HMC6352 compass"
@@ -451,6 +419,14 @@ config SENSORS_AK8975
 	help
 	  If you say yes here you get support for Asahi Kasei's
 	  orientation sensor AK8975.
+
+config SENSORS_AK8963
+	tristate "AK8963 compass support"
+	default n
+	depends on I2C
+	help
+	  If you say yes here you get support for Asahi Kasei's
+	  orientation sensor AK8963.
 
 config EP93XX_PWM
 	tristate "EP93xx PWM support"
@@ -555,109 +531,6 @@ config PCH_PHUB
 	  To compile this driver as a module, choose M here: the module will
 	  be called pch_phub.
 
-config USB_SWITCH_RT8973
-        tristate "MUIC RT8973"
-        depends on I2C
-        help
-          The RT8973 is a USB port accessory detector and switch.
-          The RT8973 is fully controlled using I2C and enables USB data,
-          stereo and mono audio, video, microphone and UART data to use
-          a common connector port.
-	  
-config USB_SWITCH_FSA9480
-	tristate "FSA9480 USB Switch"
-	depends on I2C
-	help
-	  The FSA9480 is a USB port accessory detector and switch.
-	  The FSA9480 is fully controlled using I2C and enables USB data,
-	  stereo and mono audio, video, microphone and UART data to use
-	  a common connector port.
-
-config SM5502_MUIC
-	bool "SILICON MITUS MUIC"
-	default n
-	help
-	  This option enables SILICON MITUS MUIC.
-
-config USB_SWITCH_TSU6721
-        tristate "TSU6721 USB Switch"
-        depends on I2C
-        help
-          The TSU6721 is a USB port accessory detector and switch.
-          The TSU6721 is fully controlled using I2C and enables USB data,
-          stereo and mono audio, video, microphone and UART data to use
-          a common connector port.
-
-config MAX77803_MUIC
-	tristate "MAX77803 MUIC Support"
-	depends on MFD_MAX77803
-	help
-	  If you say yes here you get support for the MUIC device of
-	  Maxim MAX77803 PMIC.
-	  The MAX77803 MUIC is a USB port accessory detector and switch.
-
-config MAX77804K_MUIC
-	tristate "MAX77804K MUIC Support"
-	depends on MFD_MAX77804K
-	help
-	  If you say yes here you get support for the MUIC device of
-	  Maxim MAX77804K PMIC.
-	  The MAX77804K MUIC is a USB port accessory detector and switch.
-
-config MAX77888_MUIC
-	tristate "MAX77888 MUIC Support"
-	depends on MFD_MAX77888
-	help
-	  If you say yes here you get support for the MUIC device of
-	  Maxim MAX77888 PMIC.
-	  The MAX77888 MUIC is a USB port accessory detector and switch.
-
-config USB_SWITCH_FSA9485
-	tristate "FSA9485 USB Switch"
-	depends on I2C
-	help
-	  The FSA9485 is a USB port accessory detector and switch.
-	  The FSA9485 is fully controlled using I2C and enables USB data,
-	  stereo and mono audio, video, microphone and UART data to use
-	  a common connector port.
-
-config MUIC_FSA9485_SUPPORT_CAR_DOCK
-	tristate "FSA9485 Support Car Dock"
-	depends on I2C
-	help
-	  The FSA9485 is a USB port accessory detector and switch.
-	  This Config can config for supporting Car Dock or not.
-
-config MAX8997_MUIC
-	tristate "MAX8997 MUIC Support"
-	depends on MFD_MAX8997
-	help
-	  If you say yes here you get support for the MUIC device of
-	  Maxim MAX8997 PMIC.
-	  The MAX8997 MUIC is a USB port accessory detector and switch.
-
-config MUIC_MAX77828_SUPPORT_OTG_AUDIO_DOCK
-	bool "MUIC_MAX77828_SUPPORT_OTG_AUDIO_DOCK"
-	depends on MFD_MAX77828
-	default n
-	help
-	  If you say yes here you will get support for the OTG audio dock.
-
-config MUIC_MAX77828_SUPPORT_SMART_DOCK
-	bool "MUIC_MAX77828_SUPPORT_SMART_DOCK"
-	depends on MFD_MAX77828
-	default n
-	help
-	  If you say yes here you will get support for the smart dock.
-
-config MUIC_MAX77828_SUPPORT_MHL_CABLE_DETECTION
-	bool "MUIC_MAX77828_SUPPORT_MHL_CABLE_DETECTION"
-	depends on MFD_MAX77828
-	default y
-	help
-	  If you say yes here you will get support for the MHL cable
-	  detection.
-
 config WL127X_RFKILL
 	tristate "Bluetooth power control driver for TI wl127x"
 	depends on RFKILL
@@ -666,209 +539,172 @@ config WL127X_RFKILL
 	 Creates an rfkill entry in sysfs for power control of Bluetooth
 	 TI wl127x chips.
 
-config TSIF
-	depends on ARCH_MSM8X60 || ARCH_MSM8960 || ARCH_APQ8064
-	tristate "TSIF (Transport Stream InterFace) support"
+config APANIC
+	bool "Android kernel panic diagnostics driver"
 	default n
 	---help---
-	  This driver supports low level TSIF interface. It provides API
-	  for upper layer drivers. If you have a TSIF hardware, say
-	  Y here and read <file:Documentation/arm/msm/tsif.txt>.
+	 Driver which handles kernel panics and attempts to write
+	 critical debugging data to flash.
 
-	  To compile this driver as module, choose M here: the
-	  module will be called msm_tsif.
-
-config TSIF_CHRDEV
-	tristate "TSIF character device"
-	depends on TSIF
-	default n
+config APANIC_PLABEL
+	string "Android panic dump flash partition label"
+	depends on APANIC
+	default "kpanic"
 	---help---
-	  This driver uses low level TSIF interface. It provides character
-	  device useable from user space programs: one can read TSIF stream
-	  from this device.
+	 If your platform uses a different flash partition label for storing
+	 crashdumps, enter it here.
 
-	  This driver may be used as example for TSIF API usage.
-
-	  To compile this driver as module, choose M here: the
-	  module will be called tsif_chrdev.
-
-config TSIF_DEBUG
-	bool "Turn on debugging information for tsif driver"
-	depends on TSIF
-	default n
-	---help---
-	  This turns on debugging information for the tsif driver
-
-config TSPP
-	depends on ARCH_MSM
-	tristate "TSPP (Transport Stream Packet Processor) Support"
-	---help---
-	Transport Stream Packet Processor is used to offload the
-	processing of MPEG transport streams from the main processor.
-	This can also be compiled as a loadable module.
-
-config CI_BRIDGE_SPI
-	depends on SPI_QUP
-	tristate "CI Bridge SPI Driver Support"
-	---help---
-	This driver provides a simple SPI read/write interface to
-	an external CI bridge. It implements a character device
-	driver interface which allows making SPI transactions
-	using the Linux SPI framework.
-
-	To compile this driver as module, choose M here.
-
-config HAPTIC_ISA1200
-	tristate "ISA1200 haptic support"
-	depends on I2C
+config JACK_MON
+	bool "Jacks Monitoring Driver"
 	default n
 	help
-	  The ISA1200 is a high performance enhanced haptic driver.
+	 Jacks Monitoring Driver
 
-config PMIC8058_PWM
-	tristate "Qualcomm PM8058 PWM support"
-	depends on PMIC8058
-	default y
-	help
-	  This option enables device driver support for the PWM channels
-	  on Qualcomm PM8058 chip. Pulse Width Modulation is used for
-	  purposes including software controlled brightness of backlight,
-	  motor control, and waveform generation.
-
-config PMIC8XXX_VIBRATOR
-	tristate "Qualcomm Vibrator support for PMIC8XXX"
-	depends on MFD_PM8XXX && ANDROID_TIMED_OUTPUT
-	help
-	  This option enables device driver support for the vibrator
-	  on the PM8XXX chips. The vibrator is controlled using the
-	  timed output class.
-
-config PMIC8XXX_NFC
-	tristate "Qualcomm PM8XXX support for Near Field Communication"
-	depends on MFD_PM8XXX
-	help
-	  Qualcomm PM8XXX chips have a module to support NFC (Near Field
-	  Communication). This option enables the driver to support it.
-
-config PMIC8XXX_UPL
-	tristate "Qualcomm PM8XXX support for User Programmable Logic"
-	depends on MFD_PM8XXX
-	help
-	  This option enables device driver support for User Programmable Logic
-	  on Qualcomm PM8XXX chips. The UPL module provides a means to implement
-	  simple truth table based logic via a set of control registers. I/O may
-	  be routed in and out of the UPL module via GPIO or DTEST pins.
-
-config PMIC8058_XOADC
-	tristate "Qualcomm PM8058 XOADC driver"
-	depends on PMIC8058
+config UART_SELECT
+	bool "Uart Selection Driver"
 	default n
 	help
-	  Enables User processor ADC reads over the XOADC module of Qualcomm's
-	  PMIC8058. Driver interface to program registers of the ADC over
-	  AMUX channels, devices on programmable MPP's and xotherm.
+	 This is uart selection driver.
 
-config QSEECOM
-	tristate "Qualcomm Secure Execution Communicator driver"
-	help
-	  Provides a communication interface between userspace and
-	  Qualcomm Secure Execution Environment (QSEE) using Secure Channel
-	  Manager (SCM) interface.
-
-config QFP_FUSE
-	tristate "QFPROM Fuse Read/Write support"
-	help
-	  This option enables device driver to read/write QFPROM
-	  fuses. The ioctls provides the necessary interface
-	  to the fuse block. Currently this is supported only
-	  on FSM targets.
-
-config QPNP_MISC
-	tristate "QPNP Misc Peripheral"
-	depends on SPMI
-	help
-	  Say 'y' here to include support for the Qualcomm QPNP MISC
-	  peripheral. The MISC peripheral holds the USB ID interrupt
-	  and the driver provides an API to check if this interrupt
-	  is available on the current PMIC chip.
-
-config SEC_MISC
-	bool "Samsung P series miscellaneous driver"
+config SWITCH_DUAL_MODEM
+	bool "Switch UART/USB to dual MODEM"
 	default n
-	---help---
-	  Samsung P series miscellaneous driver
-	  This creates sys fs entries for changing
-	  debug levels. The debug level is stored in
-	  Param partition
+	help
+	 This feature can be active when do dual CP project such as Grande.
+	 This can offer an interface to switch UART/USB to AP/CP1/CP2 at *#7284# keystring application.
+	 Need to change UI at *#7284# also to have effect on this.
+	 Use a combination of MAX77693 switch function and GPIO control.
 
-config SAMSUNG_JACK
-	bool "3.5 PI Jack driver for Samsung devices"
+config SWITCH_USB_PATH_AUTO
+	bool "Switch USB path automatically"
+	default n
+	help
+	 This feature can be switch the path of USB automatically when switching the USB path by using the sysfs node
+
+config WIMAX_CMC
+        bool "SUB PMIC FOR WIMAX CMC"
+        depends on I2C
+        default n
+	help
+	 This is feature for WIMAX ICS on gaudi Devices.
+	 This is a 4G technology and connected through the SDIO interface 3.
+	 This is powered through the max8893.
+	 This feature is enabled by default if Wimax is enabled.
+
+config SEC_DEV_JACK
+	bool "Earjack detection driver for Samsung devices"
 	depends on INPUT
 	default n
-	help
-	 This is 3.5 PI JACK driver for Samsung devies.
-	 sec_jack from samsung driver used for samsung devices.
+	---help---
+	 This is Earjack detection driver for Samsung devices.
 
-	 To samsung jack is reviewed and supported in all the
-	 samsung devices.
-
-config USB_HSIC_SMSC_HUB
-	tristate "Support for HSIC based MSM on-chip SMSC3503 HUB"
-	depends on USB_EHCI_MSM_HSIC
-	help
-	  Enables support for the HSIC (High Speed Inter-Chip) based
-	  SMSC3503 hub controller present on the Qualcomm chipsets.
-
-	  This adds support for connecting devices like mouse in HSIC
-	  Host mode.
-
-config BCM2079X_NFC_I2C
-	tristate "BCM2079X NFC driver for I2C interface"
-	depends on I2C
+config MUIC_DET_JACK
+	bool "Earjack detection driver using MUIC"
 	default n
 	help
-	  Say yes if you want BCM2079X Near Field Communication driver.
-	  This is for spi connected version. If unsure, say N here.
-	  To compile this driver as a module, choose m here. The module will
-	  be called bcm2079x-i2c.
+	 This is Earjack detection driver using MUIC.
+	 MUIC can recognize earjack device type and earkey using ADC values.
+	 Some project use muic earjack instead of 3.5phi earjack.
+	 Max77693 muic also support earjack detection.
 
-config NFC_PN547
-	bool "NXP PN547 NFC Controller Driver"
-	depends on I2C
+config FM34_WE395
+	bool "Forte Media 2MIC driver"
 	default n
 	help
-	  NXP PN547 Near Field Communication controller support.
-	  This option enables device driver support for the NFC.
-	  It is used by many services. NFC is fully controlled using I2C
-	  to communicate the AP chip.
+	  This is Forte media voice solution devices.
+	  Say yes here to build support for FM34_WE395 2mic driver.
+	  If your device have this soulution, you maybe say yes to hear sounds.
+	  FM34 series (FM34-WE395, FM34-WE500) share it.
 
-config NFC_PN547_PMC8974_CLK_REQ
-	bool "NXP PN547 NFC Controller Driver"
-	depends on I2C
+config AUDIENCE_ES305
+	bool "Audience 2MIC driver"
 	default n
 	help
-	  PM8941 Clock request for NXP PN547 Near Field
-	  Communication controller support.
-	  This option enables d1 clock for NFC.
+	  This is Audience voice processor devices.
+	  Say yes here to build support for AUDIENCE_ES305 2mic driver.
+	  Audience A2220 series are same as ES305.
+	  A1026 also can use this driver.
 
-config TI_DRV2667
-	tristate "TI's DRV2667 haptic controller support"
+source "drivers/misc/2mic/Kconfig"
+
+config USBHUB_USB3503
+	bool "USB3503 USB HUB Driver"
 	depends on I2C
 	help
-	  The DRV2667 is a piezo haptic controller chip. It can drive
-	  piezo haptics either in digital mode or analog mode. This chip
-	  can be used in variety of devices to provide haptic support.
+	 Enables USB HUB USB3503
 
-	  To compile this driver as a module, choose M here: the
-	  module will be called ti_drv2667.
+config USBHUB_USB3503_OTG_CONN
+	bool "USB3503 USB HUB Driver"
+	depends on I2C
+	help
+	 Enables USB HUB USB3503
+
+config USBHUB_USB3803
+	bool "USB3803 USB HUB Driver"
+	depends on I2C
+	help
+	 Enables USB HUB USB3803. Say yes to use USB3803 usb hub
+	 for the device. This hub is used to switch the usb
+	 connection between AP and CP.
+
+	 If unsure, say N
+
+config PN544
+        bool "NXP PN544 NFC Controller Driver"
+        default n
+        help
+          NXP PN544 Near Field Communication controller support.
+
+config STMPE811_ADC
+	tristate "STMPE811 ADC driver"
+	depends on I2C
+	---help---
+	  Say yes here to build support for STMPE811 8 channel ADC driver
+
+config TIMA_LOG
+	tristate "Support for dumping TIMA log"
+	default y
+	help
+	  This option enables support for dumping TIMA log
+
+config MPU_SENSORS_MPU3050
+    tristate "MPU3050"
+    depends on I2C
+
+config MPU_SENSORS_MPU6050
+    tristate "MPU6050"
+    depends on I2C
 
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
 source "drivers/misc/cb710/Kconfig"
 source "drivers/misc/iwmc3200top/Kconfig"
+if MPU_SENSORS_MPU3050
+source "drivers/misc/mpu3050/Kconfig"
+endif
+if MPU_SENSORS_MPU6050
+source "drivers/misc/inv_mpu/Kconfig"
+endif
 source "drivers/misc/ti-st/Kconfig"
 source "drivers/misc/lis3lv02d/Kconfig"
 source "drivers/misc/carma/Kconfig"
-source "drivers/misc/altera-stapl/Kconfig"
+source "drivers/misc/c2c/Kconfig"
 source "drivers/misc/modem_if/Kconfig"
-endmenu
+source "drivers/misc/modem_if_na/Kconfig"
+source "drivers/misc/modem_if_na_spr/Kconfig"
+source "drivers/misc/modem_v2/Kconfig"
+
+config SLP_LOWMEM_NOTIFY
+	bool "Driver for SLP Low Memory Notification"
+	depends on SLP
+	help
+	  Provide interface to register for low memory notifications.
+
+config SLP_PROCESS_MON
+	bool "Driver for SLP process monitoring"
+	depends on SLP
+	help
+	  Providing monitoring important processes. Users can register the process
+	  with sysfs.
+
+endif # MISC_DEVICES

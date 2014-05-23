@@ -13,10 +13,9 @@
  *
  */
 
-#include <linux/atomic.h>
+#include <asm/atomic.h>
 #include <linux/init.h>
 #include <linux/crypto.h>
-#include <linux/module.h>	/* for module_name() */
 #include <linux/rwsem.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
@@ -142,7 +141,7 @@ static const struct file_operations proc_crypto_ops = {
 };
 
 #ifdef CONFIG_CRYPTO_FIPS
-void crypto_init_proc(int *fips_error)
+void __init crypto_init_proc(int *fips_error)
 {
 	proc_create("crypto", 0, NULL, &proc_crypto_ops);
 	crypto_sysctl_table[0].data = fips_error;

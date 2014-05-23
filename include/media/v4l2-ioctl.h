@@ -11,6 +11,7 @@
 
 #include <linux/poll.h>
 #include <linux/fs.h>
+#include <linux/device.h>
 #include <linux/mutex.h>
 #include <linux/compiler.h> /* need __user */
 #include <linux/videodev2.h>
@@ -121,8 +122,6 @@ struct v4l2_ioctl_ops {
 	int (*vidioc_qbuf)    (struct file *file, void *fh, struct v4l2_buffer *b);
 	int (*vidioc_dqbuf)   (struct file *file, void *fh, struct v4l2_buffer *b);
 
-	int (*vidioc_create_bufs)(struct file *file, void *fh, struct v4l2_create_buffers *b);
-	int (*vidioc_prepare_buf)(struct file *file, void *fh, struct v4l2_buffer *b);
 
 	int (*vidioc_overlay) (struct file *file, void *fh, unsigned int i);
 	int (*vidioc_g_fbuf)   (struct file *file, void *fh,
@@ -158,6 +157,8 @@ struct v4l2_ioctl_ops {
 					struct v4l2_queryctrl *a);
 	int (*vidioc_g_ctrl)           (struct file *file, void *fh,
 					struct v4l2_control *a);
+	int (*vidioc_noti_ctrl)           (struct file *file, void *fh,
+					struct v4l2_noti_control *a);
 	int (*vidioc_s_ctrl)           (struct file *file, void *fh,
 					struct v4l2_control *a);
 	int (*vidioc_g_ext_ctrls)      (struct file *file, void *fh,
@@ -195,10 +196,6 @@ struct v4l2_ioctl_ops {
 					struct v4l2_crop *a);
 	int (*vidioc_s_crop)           (struct file *file, void *fh,
 					struct v4l2_crop *a);
-	int (*vidioc_g_selection)      (struct file *file, void *fh,
-					struct v4l2_selection *s);
-	int (*vidioc_s_selection)      (struct file *file, void *fh,
-					struct v4l2_selection *s);
 	/* Compression ioctls */
 	int (*vidioc_g_jpegcomp)       (struct file *file, void *fh,
 					struct v4l2_jpegcompression *a);
@@ -210,10 +207,6 @@ struct v4l2_ioctl_ops {
 					struct v4l2_encoder_cmd *a);
 	int (*vidioc_try_encoder_cmd)  (struct file *file, void *fh,
 					struct v4l2_encoder_cmd *a);
-	int (*vidioc_decoder_cmd)      (struct file *file, void *fh,
-					struct v4l2_decoder_cmd *a);
-	int (*vidioc_try_decoder_cmd)  (struct file *file, void *fh,
-					struct v4l2_decoder_cmd *a);
 
 	/* Stream type-dependent parameter ioctls */
 	int (*vidioc_g_parm)           (struct file *file, void *fh,

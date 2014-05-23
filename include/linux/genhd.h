@@ -128,8 +128,7 @@ struct hd_struct {
 #define GENHD_FL_EXT_DEVT			64 /* allow extended devt */
 #define GENHD_FL_NATIVE_CAPACITY		128
 #define GENHD_FL_BLOCK_EVENTS_ON_EXCL_WRITE	256
-#define GENHD_FL_NO_PART_SCAN			512
-#ifdef CONFIG_USB_STORAGE_DETECT
+#ifdef CONFIG_USB_HOST_NOTIFY
 #define GENHD_IF_USB	1
 #endif
 
@@ -166,7 +165,7 @@ struct gendisk {
                                          * disks that can't be partitioned. */
 
 	char disk_name[DISK_NAME_LEN];	/* name of major driver */
-	char *(*devnode)(struct gendisk *gd, umode_t *mode);
+	char *(*devnode)(struct gendisk *gd, mode_t *mode);
 
 	unsigned int events;		/* supported events */
 	unsigned int async_events;	/* async events, subset of all */
@@ -194,7 +193,7 @@ struct gendisk {
 	struct blk_integrity *integrity;
 #endif
 	int node_id;
-#ifdef CONFIG_USB_STORAGE_DETECT
+#ifdef CONFIG_USB_HOST_NOTIFY
 	int media_present;
 	int interfaces;
 #endif
@@ -229,6 +228,12 @@ static inline void part_pack_uuid(const u8 *uuid_str, u8 *to)
 	}
 }
 
+static inline char *part_unpack_uuid(const u8 *uuid, char *out)
+{
+	sprintf(out, "%pU", uuid);
+	return out;
+}
+
 static inline int disk_max_parts(struct gendisk *disk)
 {
 	if (disk->flags & GENHD_FL_EXT_DEVT)
@@ -236,10 +241,9 @@ static inline int disk_max_parts(struct gendisk *disk)
 	return disk->minors;
 }
 
-static inline bool disk_part_scan_enabled(struct gendisk *disk)
+static inline bool disk_partitionable(struct gendisk *disk)
 {
-	return disk_max_parts(disk) > 1 &&
-		!(disk->flags & GENHD_FL_NO_PART_SCAN);
+	return disk_max_parts(disk) > 1;
 }
 
 static inline dev_t disk_devt(struct gendisk *disk)
@@ -423,7 +427,7 @@ static inline int get_disk_ro(struct gendisk *disk)
 
 extern void disk_block_events(struct gendisk *disk);
 extern void disk_unblock_events(struct gendisk *disk);
-extern void disk_flush_events(struct gendisk *disk, unsigned int mask);
+extern void disk_check_events(struct gendisk *disk);
 extern unsigned int disk_clear_events(struct gendisk *disk, unsigned int mask);
 
 /* drivers/char/random.c */

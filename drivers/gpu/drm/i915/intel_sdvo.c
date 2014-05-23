@@ -28,7 +28,6 @@
 #include <linux/i2c.h>
 #include <linux/slab.h>
 #include <linux/delay.h>
-#include <linux/export.h>
 #include "drmP.h"
 #include "drm.h"
 #include "drm_crtc.h"
@@ -1220,13 +1219,7 @@ static bool intel_sdvo_get_capabilities(struct intel_sdvo *intel_sdvo, struct in
 
 static int intel_sdvo_supports_hotplug(struct intel_sdvo *intel_sdvo)
 {
-	struct drm_device *dev = intel_sdvo->base.base.dev;
 	u8 response[2];
-
-	/* HW Erratum: SDVO Hotplug is broken on all i945G chips, there's noise
-	 * on the line. */
-	if (IS_I945G(dev) || IS_I945GM(dev))
-		return false;
 
 	return intel_sdvo_get_value(intel_sdvo, SDVO_CMD_GET_HOT_PLUG_SUPPORT,
 				    &response, 2) && response[0];

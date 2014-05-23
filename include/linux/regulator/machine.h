@@ -71,7 +71,7 @@ struct regulator_state {
  * @uV_offset: Offset applied to voltages from consumer to compensate for
  *             voltage drops.
  *
- * @min_uA: Smallest current consumers may set.
+ * @min_uA: Smallest consumers consumers may set.
  * @max_uA: Largest current consumers may set.
  *
  * @valid_modes_mask: Mask of modes which may be configured by consumers.
@@ -95,7 +95,7 @@ struct regulator_state {
  */
 struct regulation_constraints {
 
-	const char *name;
+	char *name;
 
 	/* voltage output range (inclusive) - for voltage control */
 	int min_uV;
@@ -134,13 +134,17 @@ struct regulation_constraints {
 /**
  * struct regulator_consumer_supply - supply -> device mapping
  *
- * This maps a supply name to a device. Use of dev_name allows support for
- * buses which make struct device available late such as I2C.
+ * This maps a supply name to a device.  Only one of dev or dev_name
+ * can be specified.  Use of dev_name allows support for buses which
+ * make struct device available late such as I2C and is the preferred
+ * form.
  *
+ * @dev: Device structure for the consumer.
  * @dev_name: Result of dev_name() for the consumer.
  * @supply: Name for the supply.
  */
 struct regulator_consumer_supply {
+	struct device *dev;	/* consumer */
 	const char *dev_name;   /* dev_name() for consumer */
 	const char *supply;	/* consumer supply - e.g. "vcc" */
 };
@@ -188,17 +192,12 @@ int regulator_suspend_finish(void);
 #ifdef CONFIG_REGULATOR
 void regulator_has_full_constraints(void);
 void regulator_use_dummy_regulator(void);
-void regulator_suppress_info_printing(void);
 #else
 static inline void regulator_has_full_constraints(void)
 {
 }
 
 static inline void regulator_use_dummy_regulator(void)
-{
-}
-
-static inline void regulator_suppress_info_printing(void)
 {
 }
 #endif

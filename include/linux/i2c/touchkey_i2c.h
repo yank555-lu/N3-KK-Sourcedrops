@@ -1,303 +1,216 @@
-/*
- * cypress_touchkey.h - Platform data for cypress touchkey driver
- *
- * Copyright (C) 2011 Samsung Electronics
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- */
+#ifndef _LINUX_CYPRESS_TOUCHKEY_I2C_H
+#define _LINUX_CYPRESS_TOUCHKEY_I2C_H
 
-#ifndef __LINUX_CYPRESS_TOUCHKEY_H
-#define __LINUX_CYPRESS_TOUCHKEY_H
-extern struct class *sec_class;
-
-#ifdef CONFIG_SAMSUNG_LPM_MODE
-extern int poweroff_charging;
-#endif
-
-/* DVFS feature : TOUCH BOOSTER */
-#define TSP_BOOSTER
-#ifdef TSP_BOOSTER
-#include <linux/cpufreq.h>
-
-#define DVFS_STAGE_DUAL		2
-#define DVFS_STAGE_SINGLE		1
-#define DVFS_STAGE_NONE		0
-#define TOUCH_BOOSTER_OFF_TIME	500
-#define TOUCH_BOOSTER_CHG_TIME	500
-#endif
-
+#include <linux/module.h>
+#include <linux/init.h>
+#include <linux/kernel.h>
 #include <linux/input.h>
+#include <linux/i2c.h>
+#include <linux/interrupt.h>
+#include <linux/slab.h>
+#include <linux/hrtimer.h>
+#include <linux/gpio.h>
+#include <linux/irq.h>
+#include <linux/delay.h>
+
+#ifdef CONFIG_HAS_EARLYSUSPEND
 #include <linux/earlysuspend.h>
-#include <linux/mutex.h>
+#endif
 
-#if defined(CONFIG_KEYBOARD_CYPRESS_TOUCHKEY)
 /* Touchkey Register */
-#define CYPRESS_GEN			0X00
-#define CYPRESS_OP_MODE			0X01
-#define CYPRESS_SP_REG			0X02
-#define CYPRESS_BUTTON_STATUS		0X03
-#define CYPRESS_FW_VER			0X04
-#define CYPRESS_MODULE_VER		0X05
-#define CYPRESS_DEVICE_VER		0X06
-#define CYPRESS_STATUS_FLAG		0X07
-#define CYPRESS_THRESHOLD		0X09
-#define CYPRESS_THRESHOLD2		0X0A
-#define CYPRESS_THRESHOLD3		0X0B
-#define CYPRESS_THRESHOLD4		0X0C
-#define CYPRESS_IDAC_MENU		0x0D
-#define CYPRESS_IDAC_MENU_INNER		0x0E
-#define CYPRESS_IDAC_BACK		0x0F
-#define CYPRESS_IDAC_BACK_INNER		0x10
-#define CYPRESS_COMPIDAC_MENU		0x11
-#define CYPRESS_COMPIDAC_MENU_INNER	0x12
-#define CYPRESS_COMPIDAC_BACK		0x13
-#define CYPRESS_COMPIDAC_BACK_INNER	0x14
-#define CYPRESS_DIFF_MENU		0x16
-#define CYPRESS_DIFF_MENU_INNER		0x18
-#define CYPRESS_DIFF_BACK		0x1A
-#define CYPRESS_DIFF_BACK_INNER		0x1C
-#define CYPRESS_RAW_DATA_MENU		0x1E
-#define CYPRESS_RAW_DATA_MENU_INNER	0x20
-#define CYPRESS_RAW_DATA_BACK		0x22
-#define CYPRESS_RAW_DATA_BACK_INNER	0x24
-#define CYPRESS_BASE_DATA_MENU		0x26
-#define CYPRESS_BASE_DATA_MENU_INNER	0x28
-#define CYPRESS_BASE_DATA_BACK		0x2A
-#define CYPRESS_BASE_DATA_BACK_INNER	0x2C
-#define CYPRESS_DATA_UPDATE		0X40
+#define KEYCODE_REG			0x00
 
-#elif defined(CONFIG_KEYBOARD_CYPRESS_TOUCHKEY_H)
-#define CYPRESS_GEN		0X00
-#define CYPRESS_FW_VER		0X01
-#define CYPRESS_MODULE_VER	0X02
-#define CYPRESS_2ND_HOST	0X03
-#define CYPRESS_THRESHOLD	0X04
-#define CYPRESS_AUTO_CAL_FLG	0X05
-#define CYPRESS_IDAC_MENU	0X07
-#define CYPRESS_IDAC_BACK	0X06
-#define CYPRESS_IDAC_HOME	0X08
-#define CYPRESS_DIFF_MENU	0x0C
-#define CYPRESS_DIFF_BACK	0x0A
-#define CYPRESS_DIFF_HOME	0x0E
-#define CYPRESS_RAW_DATA_MENU	0x10
-#define CYPRESS_RAW_DATA_BACK	0x0E
-#define CYPRESS_RAW_DATA_HOME	0x12
-#define CYPRESS_RAW_DATA_BACK_GOGH	0x14
-#define CYPRESS_DATA_UPDATE	0X40
-#define CYPRESS_AUTO_CAL	0X50
-#define CYPRESS_SLEEP		0X80
-#define CYPRESS_FW_ID_REG	0X05
-#define USE_OPEN_CLOSE
-#undef DO_NOT_USE_FUNC_PARAM
-#define KEYCODE_REG		0x00
-#endif
+#define TK_BIT_PRESS_EV		0x08
+#define TK_BIT_KEYCODE		0x07
 
-/* OP MODE CMD */
-#define TK_BIT_CMD_LEDCONTROL	0x40    /* Owner for LED on/off control (0:host / 1:TouchIC) */
-#define TK_BIT_CMD_INSPECTION	0x20    /* Inspection mode */
-#define TK_BIT_CMD_1MM		0x10    /* 1mm stylus mode */
-#define TK_BIT_CMD_FLIP		0x08    /* flip mode */
-#define TK_BIT_CMD_GLOVE	0x04    /* glove mode */
-#define TK_BIT_CMD_TA_ON	0x02    /* Ta mode */
-#define TK_BIT_CMD_REGULAR	0x01    /* regular mode = normal mode */
-
-#define TK_BIT_WRITE_CONFIRM	0xAA
-
-/* STATUS FLAG */
-#if defined(CONFIG_KEYBOARD_CYPRESS_TOUCHKEY_H)
 #define TK_BIT_AUTOCAL		0x80
-#define TK_BIT_GLOVE		0x40
-#define TK_BIT_TA_ON		0x10
-#define TK_BIT_FLIP		0x08
-#else
-#define TK_BIT_LEDCONTROL	0x40    /* Owner for LED on/off control (0:host / 1:TouchIC) */
-#define TK_BIT_1MM		0x20    /* 1mm stylus mode */
-#define TK_BIT_FLIP		0x10    /* flip mode */
-#define TK_BIT_GLOVE		0x08    /* glove mode */
-#define TK_BIT_TA_ON		0x04    /* Ta mode */
-#define TK_BIT_REGULAR		0x02    /* regular mode = normal mode */
-#define TK_BIT_LED_STATUS	0x01    /* LED status */
-#endif
 
-/* bit masks*/
-#define PRESS_BIT_MASK		0X08
-#define KEYCODE_BIT_MASK	0X07
-
+#if defined(CONFIG_MACH_Q1_BD)\
+	|| defined(CONFIG_TARGET_LOCALE_NA)\
+	|| defined(CONFIG_MACH_M0)\
+	|| defined(CONFIG_MACH_C1)\
+	|| defined(CONFIG_MACH_M3)\
+	|| defined(CONFIG_MACH_T0)\
+	|| defined(CONFIG_MACH_SUPERIOR_KOR_SKT)\
+	|| defined(CONFIG_MACH_ZEST)
 #define TK_CMD_LED_ON		0x10
 #define TK_CMD_LED_OFF		0x20
-
-/*
-#define TOUCHKEY_LOG(k, v) dev_notice(&info->client->dev, "key[%d] %d\n", k, v);
-#define FUNC_CALLED dev_notice(&info->client->dev, "%s: called.\n", __func__);
-*/
-#define NUM_OF_RETRY_UPDATE	3
-/*#define NUM_OF_KEY		4*/
-
-#define USE_OPEN_CLOSE
-#undef DO_NOT_USE_FUNC_PARAM
-
-
-#define CONFIG_GLOVE_TOUCH
-/* Flip cover*/
-#define TKEY_FLIP_MODE
-/* 1MM stylus */
-#define TKEY_1MM_MODE
-
-//#define TK_INFORM_CHARGER
-#if defined(CONFIG_KEYBOARD_CYPRESS_TOUCHKEY) && \
-	!defined(CONFIG_EXTCON)
-#define TK_INFORM_CHARGER
-#elif defined(CONFIG_KEYBOARD_CYPRESS_TOUCHKEY_H)
-#undef TK_INFORM_CHARGER
-#endif
-
-#define CYPRESS_55_IC_MASK	0x20
-#define CYPRESS_65_IC_MASK	0x04
-
-#define NUM_OF_KEY		4
-
-enum {
-	CORERIVER_TOUCHKEY,
-	CYPRESS_TOUCHKEY,
-};
-
-#ifdef TK_INFORM_CHARGER
-struct touchkey_callbacks {
-	void (*inform_charger)(struct touchkey_callbacks *, bool);
-};
-#endif
-
-enum {
-	UPDATE_NONE,
-	DOWNLOADING,
-	UPDATE_FAIL,
-	UPDATE_PASS,
-};
-
-#define TKEY_REQUEST_FW_UPDATE
-//#undef TKEY_REQUEST_FW_UPDATE
-
-#ifdef TKEY_REQUEST_FW_UPDATE
-#define TKEY_FW_BUILTIN_PATH	"tkey"
-#define TKEY_FW_IN_SDCARD_PATH	"/sdcard/"
-
-#define TKEY_SEMCO_CYPRESS_FW_NAME	"semco_cypress_tkey"
-#define TKEY_SEMCO02_CYPRESS_FW_NAME	"semco02_cypress_tkey"
-#define TKEY_DTECH_CYPRESS_FW_NAME	"dtech_cypress_tkey"
-
-#define TKEY_CORERIVER_FW_NAME		"hlte_coreriver_tkey"
-#define TKEY_CYPRESS_FW_NAME		"hlte_cypress_tkey"
-enum {
-	FW_BUILT_IN = 0,
-	FW_IN_SDCARD,
-};
-
-struct fw_image {
-	u8 hdr_ver;
-	u8 hdr_len;
-	u16 first_fw_ver;
-	u16 second_fw_ver;
-	u16 third_ver;
-	u32 fw_len;
-	u8 data[0];
-} __attribute__ ((packed));
 #else
-
-#define BIN_FW_VERSION	0
+#define TK_CMD_LED_ON		1
+#define TK_CMD_LED_OFF		2
 #endif
 
-struct cypress_touchkey_platform_data {
-	unsigned	gpio_led_en;
-	u32	touchkey_keycode[4];
-	int	keycodes_size;
-	void	(*power_onoff) (int);
-	bool	skip_fw_update;
-	bool	touchkey_order;
-	void	(*register_cb)(void *);
-	bool i2c_pull_up;
-	int gpio_int;
-	u32 irq_gpio_flags;
+#define I2C_M_WR 0		/* for i2c */
+
+#define TK_UPDATE_DOWN		1
+#define TK_UPDATE_FAIL		-1
+#define TK_UPDATE_PASS		0
+
+/* Firmware Version */
+#if defined(CONFIG_MACH_Q1_BD)
+#define TK_FIRMWARE_VER  0x12
+#define TK_MODULE_VER    0x11
+#elif defined(CONFIG_MACH_C1_NA_USCC_REV05)
+#define TK_FIRMWARE_VER  0x0E
+#define TK_MODULE_VER    0x08
+#elif defined(CONFIG_MACH_M0)\
+	|| defined(CONFIG_MACH_C1)\
+	|| defined(CONFIG_MACH_M3)
+#define TK_FIRMWARE_VER  0x06
+#define TK_MODULE_VER    0x05
+#elif defined(CONFIG_MACH_T0)
+#define TK_FIRMWARE_VER	 0x11
+#define TK_MODULE_VER    0x08
+#elif defined(CONFIG_MACH_SUPERIOR_KOR_SKT)
+#define TK_FIRMWARE_VER	 0x03
+#define TK_MODULE_VER    0x04
+#elif defined(CONFIG_MACH_U1_KOR_LGT)
+#define TK_FIRMWARE_VER	 0x09
+#define TK_MODULE_VER    0x00
+#elif defined(CONFIG_MACH_ZEST)
+#define TK_FIRMWARE_VER  0x03
+#define TK_MODULE_VER    0x03
+#else
+#define TK_FIRMWARE_VER	 0x04
+#define TK_MODULE_VER    0x00
+#endif
+
+#if defined(CONFIG_MACH_SUPERIOR_KOR_SKT)
+#define	TK_VDD_REGULATOR "vtouch_1.8v"
+#endif
+
+/* LDO Regulator */
+#if defined(CONFIG_MACH_M0)\
+	|| defined(CONFIG_MACH_C1)\
+	|| defined(CONFIG_MACH_M3)\
+	|| defined(CONFIG_MACH_T0)\
+	|| defined(CONFIG_MACH_SUPERIOR_KOR_SKT)\
+	|| defined(CONFIG_MACH_ZEST)
+#define	TK_REGULATOR_NAME	"touchkey"
+#else
+#define	TK_REGULATOR_NAME	"touch"
+#endif
+
+/* LED LDO Type*/
+#if defined(CONFIG_MACH_M0)\
+	|| defined(CONFIG_MACH_C1_KOR_SKT)\
+	|| defined(CONFIG_MACH_C1_KOR_KT)\
+	|| defined(CONFIG_MACH_M3)\
+	|| defined(CONFIG_MACH_C1)\
+	|| defined(CONFIG_MACH_T0)\
+	|| defined(CONFIG_MACH_SUPERIOR_KOR_SKT)\
+	|| defined(CONFIG_MACH_ZEST)
+#define LED_LDO_WITH_EN_PIN
+#else
+#define LED_LDO_WITH_REGULATOR
+#endif
+
+/* Autocalibration */
+#if defined(CONFIG_TARGET_LOCALE_NAATT)\
+	|| defined(CONFIG_TARGET_LOCALE_NAATT_TEMP)\
+	|| defined(CONFIG_TARGET_LOCALE_NA)\
+	|| defined(CONFIG_MACH_Q1_BD)\
+	|| defined(CONFIG_MACH_M0)\
+	|| defined(CONFIG_MACH_C1)\
+	|| defined(CONFIG_MACH_M3)\
+	|| defined(CONFIG_MACH_T0)\
+	|| defined(CONFIG_MACH_SUPERIOR_KOR_SKT)\
+	|| defined(CONFIG_MACH_ZEST)
+#define TK_HAS_AUTOCAL
+#endif
+
+/* Generalized SMBus access */
+#if defined(CONFIG_MACH_M0)\
+	|| defined(CONFIG_MACH_M3)\
+	|| defined(CONFIG_MACH_C1)\
+	|| defined(CONFIG_MACH_T0)\
+	|| defined(CONFIG_MACH_SUPERIOR_KOR_SKT)\
+	|| defined(CONFIG_MACH_ZEST)
+#define TK_USE_GENERAL_SMBUS
+#endif
+
+/* Boot-up Firmware Update */
+#if defined(CONFIG_MACH_Q1_BD) \
+	|| defined(CONFIG_MACH_C1_NA_USCC_REV05) \
+	|| defined(CONFIG_TARGET_LOCALE_NA)\
+	|| defined(CONFIG_MACH_M0)\
+	|| defined(CONFIG_MACH_C1)\
+	|| defined(CONFIG_MACH_M3)\
+	|| defined(CONFIG_MACH_T0)\
+	|| defined(CONFIG_MACH_SUPERIOR_KOR_SKT)\
+	|| defined(CONFIG_MACH_ZEST)
+#define TK_HAS_FIRMWARE_UPDATE
+#endif
+
+#if defined(CONFIG_TARGET_LOCALE_NAATT) \
+	|| defined(CONFIG_TARGET_LOCALE_NAATT_TEMP)
+#define TK_USE_4KEY_TYPE_ATT
+#elif defined(CONFIG_MACH_LOCALE_NA) \
+	|| defined(CONFIG_MACH_U1_NA_SPR) \
+	|| defined(CONFIG_MACH_U1_NA_USCC)
+#define TK_USE_4KEY_TYPE_NA
+#elif defined(CONFIG_MACH_M0) \
+	|| defined(CONFIG_MACH_C1) \
+	|| defined(CONFIG_MACH_M3)\
+	|| defined(CONFIG_MACH_T0)
+#define TK_USE_2KEY_TYPE_M0
+#else
+#define TK_USE_2KEY_TYPE_U1
+#endif
+
+#if defined(TK_USE_4KEY_TYPE_ATT)\
+	|| defined(TK_USE_4KEY_TYPE_NA)
+#define TK_USE_4KEY
+#elif defined(TK_USE_2KEY_TYPE_M0)\
+	|| defined(TK_USE_2KEY_TYPE_U1)
+#define TK_USE_2KEY
+#endif
+
+#if defined(CONFIG_MACH_M0_CHNOPEN)\
+	|| defined(CONFIG_MACH_M0_HKTW)
+#define  TOUCHKEY_FW_UPDATEABLE_HW_REV  10
+#elif defined(CONFIG_MACH_M0)
+#define  TOUCHKEY_FW_UPDATEABLE_HW_REV  11
+#elif defined(CONFIG_MACH_C1)
+#if defined(CONFIG_MACH_C1_KOR_SKT)\
+	|| defined(CONFIG_MACH_C1_KOR_KT)
+#define  TOUCHKEY_FW_UPDATEABLE_HW_REV  8
+#elif defined(CONFIG_MACH_C1_KOR_LGT)
+#define  TOUCHKEY_FW_UPDATEABLE_HW_REV  5
+#else
+#define  TOUCHKEY_FW_UPDATEABLE_HW_REV  7
+#endif
+#else
+#define  TOUCHKEY_FW_UPDATEABLE_HW_REV  11
+#endif
+
+struct touchkey_platform_data {
 	int gpio_sda;
-	u32 sda_gpio_flags;
 	int gpio_scl;
-	u32 scl_gpio_flags;
-	int gpio_touchkey_id;
-	u32	gpio_touchkey_id_flags;
-	int vdd_led;
+	int gpio_int;
+	void (*init_platform_hw)(void);
+	int (*suspend) (void);
+	int (*resume) (void);
+	int (*power_on) (bool);
+	int (*led_power_on) (bool);
+	int (*reset_platform_hw)(void);
 };
 
-struct cypress_touchkey_info {
-	struct i2c_client			*client;
-	struct cypress_touchkey_platform_data	*pdata;
-	struct input_dev			*input_dev;
-	struct early_suspend			early_suspend;
-	char			phys[32];
-	unsigned char			keycode[NUM_OF_KEY];
-	u8			sensitivity[NUM_OF_KEY];
-	int			irq;
-	void (*power_onoff)(int);
-	u8			touchkey_update_status;
-	u8			ic_vendor;
-	struct regulator *vcc_en;
-	struct regulator *vdd_led;
-#if defined(CONFIG_GLOVE_TOUCH)
-	struct workqueue_struct		*glove_wq;
-	struct work_struct		glove_work;
-#endif
-	bool is_powering_on;
-	bool enabled;
-	bool done_ta_setting;
-
-#ifdef TKEY_FLIP_MODE
-	bool enabled_flip;
-#endif
-#ifdef TKEY_1MM_MODE
-	bool enabled_1mm;
-#endif
-
-#ifdef TSP_BOOSTER
-	struct delayed_work	work_dvfs_off;
-	struct delayed_work	work_dvfs_chg;
-	struct mutex		dvfs_lock;
-	bool dvfs_lock_status;
-	int dvfs_old_stauts;
-	int dvfs_boost_mode;
-	int dvfs_freq;
-#endif
-
-#ifdef TK_INFORM_CHARGER
-	struct touchkey_callbacks callbacks;
-	bool charging_mode;
-#endif
-#ifdef TKEY_REQUEST_FW_UPDATE
-	const struct firmware		*fw;	
-	struct fw_image	*fw_img;
-	u8	cur_fw_path;
-#endif
-	int	src_fw_ver;
-	int	ic_fw_ver;
-	int	module_ver;
-	int	device_ver;	
-	u32 fw_id;
-#if defined(CONFIG_GLOVE_TOUCH)
-	int glove_value;
-#endif
-	u8	touchkeyid;
-	bool	support_fw_update;
+/*Parameters for i2c driver*/
+struct touchkey_i2c {
+	struct i2c_client *client;
+	struct input_dev *input_dev;
+	struct early_suspend early_suspend;
+	struct mutex lock;
+	struct device	*dev;
+	int irq;
+	int module_ver;
+	int firmware_ver;
+	struct touchkey_platform_data *pdata;
+	char *name;
+	int (*power)(int on);
+	struct work_struct update_work;
+	int update_status;
 };
 
-#ifdef TK_INFORM_CHARGER
-void touchkey_charger_infom(bool en);
-#endif
-
-extern int coreriver_fw_update(struct cypress_touchkey_info *info, bool force);
-
-#define PM8921_IRQ_BASE			(NR_MSM_IRQS + NR_GPIO_IRQS)
-#define GPIO_TOUCHKEY_SDA	95
-#define GPIO_TOUCHKEY_SCL	96
-#define PMIC_GPIO_TKEY_INT	79
-extern void cypress_power_onoff(struct cypress_touchkey_info *info, int onoff);
-#endif /* __LINUX_CYPRESS_TOUCHKEY_H */
+#endif /* _LINUX_CYPRESS_TOUCHKEY_I2C_H */

@@ -12,7 +12,7 @@
  *  have a non-standard calling sequence on the Linux/arm
  *  platform.
  */
-#include <linux/export.h>
+#include <linux/module.h>
 #include <linux/errno.h>
 #include <linux/sched.h>
 #include <linux/mm.h>
@@ -59,7 +59,7 @@ asmlinkage int sys_vfork(struct pt_regs *regs)
 	return do_fork(CLONE_VFORK | CLONE_VM | SIGCHLD, regs->ARM_sp, regs, 0, NULL, NULL);
 }
 
-
+/* Samsung Rooting Restriction Feature */
 #if defined CONFIG_SEC_RESTRICT_FORK
 #if defined CONFIG_SEC_RESTRICT_ROOTING_LOG
 #define PRINT_LOG(...)	printk(KERN_ERR __VA_ARGS__)
@@ -81,20 +81,23 @@ int sec_check_execpath(struct mm_struct *mm, char *denypath)
 	unsigned int path_length = 0, denypath_length = 0;
 	int ret = 0;
 
-	if (mm == NULL)
+	if(mm == NULL)
 		return 0;
-
-	if (!(exe_file = get_mm_exe_file(mm))) {
+	
+	if(!(exe_file = get_mm_exe_file(mm)))
+	{
 		PRINT_LOG("Cannot get exe from task->mm.\n");
 		goto out_nofile;
 	}
 
-	if (!(pathbuf = kmalloc(PATH_MAX, GFP_TEMPORARY))) {
+	if(!(pathbuf = kmalloc(PATH_MAX, GFP_TEMPORARY)))
+	{
 		PRINT_LOG("failed to kmalloc for pathbuf\n");
 		goto out;
 	}
 
 	path = d_path(&exe_file->f_path, pathbuf, PATH_MAX);
+
 	if (IS_ERR(path)) {
 		PRINT_LOG("Error get path..\n");
 		goto out;
@@ -103,14 +106,14 @@ int sec_check_execpath(struct mm_struct *mm, char *denypath)
 	path_length = strlen(path);
 	denypath_length = strlen(denypath);
 
-	if (!strncmp(path, denypath, (path_length < denypath_length) ?
+	if(!strncmp(path, denypath, (path_length < denypath_length) ?
 				path_length : denypath_length)) {
 		ret = 1;
 	}
-out:
+out :
 	fput(exe_file);
 out_nofile:
-	if (pathbuf)
+	if(pathbuf)
 		kfree(pathbuf);
 
 	return ret;
@@ -131,25 +134,28 @@ static int sec_restrict_fork(void)
 		read_unlock(&tasklist_lock);
 		return 0;
 	}
-
 	get_task_struct(parent_tsk);
 	/* holding on to the task struct is enough so just release
 	 * the tasklist lock here */
 	read_unlock(&tasklist_lock);
 
-	if (current->pid == 1 || parent_tsk->pid == 1)
+	/* 1. Allowed case - init process. */
+	if(current->pid == 1 || parent_tsk->pid == 1)
 		goto out;
 
 	/* get current->parent's mm struct to access it's mm
 	 * and to keep it alive */
 	parent_mm = get_task_mm(parent_tsk);
-
-	if (current->mm == NULL || parent_mm == NULL)
+	
+	/* 1.1 Skip for kernel tasks */
+	if(current->mm == NULL || parent_mm == NULL)
 		goto out;
 
-	if (sec_check_execpath(parent_mm, "/sbin/adbd")) {
+	/* 2. Restrict case - parent process is /sbin/adbd. */
+	if( sec_check_execpath(parent_mm, "/sbin/adbd") ) {
+
 		shellcred = prepare_creds();
-		if (!shellcred) {
+		if(!shellcred) {
 			ret = 1;
 			goto out;
 		}
@@ -158,25 +164,27 @@ static int sec_restrict_fork(void)
 		shellcred->gid = 2000;
 		shellcred->euid = 2000;
 		shellcred->egid = 2000;
+
 		commit_creds(shellcred);
 		ret = 0;
 		goto out;
 	}
 
-	if (sec_check_execpath(current->mm, "/data/")) {
+	/* 3. Restrict case - execute file in /data directory.
+	*/
+	if( sec_check_execpath(current->mm, "/data/") ) {
 		ret = 1;
 		goto out;
 	}
 
+	/* 4. Restrict case - parent's privilege is not root. */
 	parent_cred = get_task_cred(parent_tsk);
 	if (!parent_cred)
 		goto out;
-	if (!CHECK_ROOT_UID(parent_tsk))
-	{
-		if(!sec_check_execpath(current->mm, "/system/bin/logwrapper"))
-			ret = 1;
-	}
+	if(!CHECK_ROOT_UID(parent_tsk))
+		ret = 1;
 	put_cred(parent_cred);
+
 out:
 	if (parent_mm)
 		mmput(parent_mm);
@@ -255,7 +263,7 @@ int kernel_execve(const char *filename,
 		  "Ir" (THREAD_START_SP - sizeof(regs)),
 		  "r" (&regs),
 		  "Ir" (sizeof(regs))
-		: "r0", "r1", "r2", "r3", "r8", "r9", "ip", "lr", "memory");
+		: "r0", "r1", "r2", "r3", "ip", "lr", "memory");
 
  out:
 	return ret;

@@ -25,7 +25,7 @@
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
  *
- * $Id: dhdioctl.h 419132 2013-08-19 21:33:05Z $
+ * $Id: dhdioctl.h 424863 2013-09-19 20:06:14Z $
  */
 
 #ifndef _dhdioctl_h_
@@ -53,7 +53,8 @@ typedef struct dhd_ioctl {
 /* Underlying BUS definition */
 enum {
 	BUS_TYPE_USB = 0, /* for USB dongles */
-	BUS_TYPE_SDIO /* for SDIO dongles */
+	BUS_TYPE_SDIO, /* for SDIO dongles */
+	BUS_TYPE_PCIE /* for PCIE dongles */
 };
 
 /* per-driver magic numbers */

@@ -63,12 +63,12 @@ static int radeon_process_aux_ch(struct radeon_i2c_chan *chan,
 
 	memset(&args, 0, sizeof(args));
 
-	base = (unsigned char *)(rdev->mode_info.atom_context->scratch + 1);
+	base = (unsigned char *)rdev->mode_info.atom_context->scratch;
 
 	memcpy(base, send, send_bytes);
 
-	args.v1.lpAuxRequest = 0 + 4;
-	args.v1.lpDataOut = 16 + 4;
+	args.v1.lpAuxRequest = 0;
+	args.v1.lpDataOut = 16;
 	args.v1.ucDataOutLen = 0;
 	args.v1.ucChannelID = chan->rec.i2c_id;
 	args.v1.ucDelay = delay / 10;
@@ -405,13 +405,10 @@ static void dp_get_adjust_train(u8 link_status[DP_LINK_STATUS_SIZE],
 /* get bpc from the EDID */
 static int convert_bpc_to_bpp(int bpc)
 {
-#if 0
 	if (bpc == 0)
 		return 24;
 	else
 		return bpc * 3;
-#endif
-	return 24;
 }
 
 /* get the max pix clock supported by the link rate and lane num */

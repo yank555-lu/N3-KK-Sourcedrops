@@ -13,11 +13,10 @@
 #ifndef __LINUX_POWER_SUPPLY_H__
 #define __LINUX_POWER_SUPPLY_H__
 
+#include <linux/device.h>
 #include <linux/wakelock.h>
 #include <linux/workqueue.h>
 #include <linux/leds.h>
-
-struct device;
 
 /*
  * All voltages, currents, charges, energies, time and temperatures in uV,
@@ -52,12 +51,10 @@ enum {
 	POWER_SUPPLY_HEALTH_UNKNOWN = 0,
 	POWER_SUPPLY_HEALTH_GOOD,
 	POWER_SUPPLY_HEALTH_OVERHEAT,
-	POWER_SUPPLY_HEALTH_WARM,
 	POWER_SUPPLY_HEALTH_DEAD,
 	POWER_SUPPLY_HEALTH_OVERVOLTAGE,
 	POWER_SUPPLY_HEALTH_UNSPEC_FAILURE,
 	POWER_SUPPLY_HEALTH_COLD,
-	POWER_SUPPLY_HEALTH_COOL,
 	POWER_SUPPLY_HEALTH_UNDERVOLTAGE,
 };
 
@@ -80,10 +77,10 @@ enum {
 	POWER_SUPPLY_CAPACITY_LEVEL_FULL,
 };
 
+/* for SAMSUNG OTG */
 enum {
-	POWER_SUPPLY_SCOPE_UNKNOWN = 0,
-	POWER_SUPPLY_SCOPE_SYSTEM,
-	POWER_SUPPLY_SCOPE_DEVICE,
+	POWER_SUPPLY_CAPACITY_OTG_ENABLE = 0,
+	POWER_SUPPLY_CAPACITY_OTG_DISABLE,
 };
 
 enum power_supply_property {
@@ -93,7 +90,6 @@ enum power_supply_property {
 	POWER_SUPPLY_PROP_HEALTH,
 	POWER_SUPPLY_PROP_PRESENT,
 	POWER_SUPPLY_PROP_ONLINE,
-	POWER_SUPPLY_PROP_CHARGING_ENABLED,
 	POWER_SUPPLY_PROP_TECHNOLOGY,
 	POWER_SUPPLY_PROP_CYCLE_COUNT,
 	POWER_SUPPLY_PROP_VOLTAGE_MAX,
@@ -102,11 +98,7 @@ enum power_supply_property {
 	POWER_SUPPLY_PROP_VOLTAGE_MIN_DESIGN,
 	POWER_SUPPLY_PROP_VOLTAGE_NOW,
 	POWER_SUPPLY_PROP_VOLTAGE_AVG,
-	POWER_SUPPLY_PROP_INPUT_VOLTAGE_REGULATION,
-	POWER_SUPPLY_PROP_VOLTAGE_OCV,
 	POWER_SUPPLY_PROP_CURRENT_MAX,
-	POWER_SUPPLY_PROP_INPUT_CURRENT_MAX,
-	POWER_SUPPLY_PROP_INPUT_CURRENT_TRIM,
 	POWER_SUPPLY_PROP_CURRENT_NOW,
 	POWER_SUPPLY_PROP_CURRENT_AVG,
 	POWER_SUPPLY_PROP_POWER_NOW,
@@ -118,7 +110,6 @@ enum power_supply_property {
 	POWER_SUPPLY_PROP_CHARGE_NOW,
 	POWER_SUPPLY_PROP_CHARGE_AVG,
 	POWER_SUPPLY_PROP_CHARGE_COUNTER,
-	POWER_SUPPLY_PROP_CHARGE_COUNTER_SHADOW,
 	POWER_SUPPLY_PROP_ENERGY_FULL_DESIGN,
 	POWER_SUPPLY_PROP_ENERGY_EMPTY_DESIGN,
 	POWER_SUPPLY_PROP_ENERGY_FULL,
@@ -126,50 +117,104 @@ enum power_supply_property {
 	POWER_SUPPLY_PROP_ENERGY_NOW,
 	POWER_SUPPLY_PROP_ENERGY_AVG,
 	POWER_SUPPLY_PROP_CAPACITY, /* in percents! */
+#ifdef CONFIG_SLP
+	POWER_SUPPLY_PROP_CAPACITY_RAW,
+#endif
 	POWER_SUPPLY_PROP_CAPACITY_LEVEL,
 	POWER_SUPPLY_PROP_TEMP,
-	POWER_SUPPLY_PROP_COOL_TEMP,
-	POWER_SUPPLY_PROP_WARM_TEMP,
 	POWER_SUPPLY_PROP_TEMP_AMBIENT,
 	POWER_SUPPLY_PROP_TIME_TO_EMPTY_NOW,
 	POWER_SUPPLY_PROP_TIME_TO_EMPTY_AVG,
 	POWER_SUPPLY_PROP_TIME_TO_FULL_NOW,
 	POWER_SUPPLY_PROP_TIME_TO_FULL_AVG,
 	POWER_SUPPLY_PROP_TYPE, /* use power_supply.type instead */
-	POWER_SUPPLY_PROP_SCOPE,
-	POWER_SUPPLY_PROP_SYSTEM_TEMP_LEVEL,
-	POWER_SUPPLY_PROP_RESISTANCE,
 	/* Properties of type `const char *' */
 	POWER_SUPPLY_PROP_MODEL_NAME,
 	POWER_SUPPLY_PROP_MANUFACTURER,
 	POWER_SUPPLY_PROP_SERIAL_NUMBER,
+#if defined(CONFIG_MACH_GC1) || defined(CONFIG_MACH_GD2)
+	POWER_SUPPLY_PROP_RCOMP,
+#endif
+#if defined(CONFIG_MACH_GD2)
+	POWER_SUPPLY_PROP_HDMI,
+#endif
+#if defined(CONFIG_MACH_KONA)
+	POWER_SUPPLY_PROP_CHARGING_MODE,
+	POWER_SUPPLY_PROP_COMPENSATION_1,
+	POWER_SUPPLY_PROP_COMPENSATION_3,
+#endif
 };
 
 enum power_supply_type {
 	POWER_SUPPLY_TYPE_UNKNOWN = 0,
-	POWER_SUPPLY_TYPE_BATTERY,			/* 1 */
-	POWER_SUPPLY_TYPE_UPS,				/* 2 */
-	POWER_SUPPLY_TYPE_MAINS,			/* 3 */
-	POWER_SUPPLY_TYPE_USB,				/* Standard Downstream Port (4) */
-	POWER_SUPPLY_TYPE_USB_DCP,			/* Dedicated Charging Port (5) */
-	POWER_SUPPLY_TYPE_USB_CDP,			/* Charging Downstream Port (6) */
-	POWER_SUPPLY_TYPE_USB_ACA,			/* Accessory Charger Adapters (7) */
-	POWER_SUPPLY_TYPE_BMS,				/* Battery Monitor System (8) */
-	POWER_SUPPLY_TYPE_MISC,				/* 9 */
-	POWER_SUPPLY_TYPE_WIRELESS,			/* 10 */
-	POWER_SUPPLY_TYPE_CARDOCK,			/* 11 */
-	POWER_SUPPLY_TYPE_UARTOFF,			/* 12 */
-	POWER_SUPPLY_TYPE_OTG,				/* 13 */
-	POWER_SUPPLY_TYPE_LAN_HUB,			/* 14 */
-	POWER_SUPPLY_TYPE_MHL_500,			/* 15 */
-	POWER_SUPPLY_TYPE_MHL_900,			/* 16 */
-	POWER_SUPPLY_TYPE_MHL_1500,			/* 17 */
-	POWER_SUPPLY_TYPE_MHL_USB,			/* 18 */
-	POWER_SUPPLY_TYPE_SMART_OTG,		/* 19 */
-	POWER_SUPPLY_TYPE_SMART_NOTG,		/* 20 */
-	POWER_SUPPLY_TYPE_POWER_SHARING,		/* power sharing cable(21) */
-	POWER_SUPPLY_TYPE_WIRELESS_REMOVE, /* Always last value (22)*/
+	POWER_SUPPLY_TYPE_BATTERY,
+	POWER_SUPPLY_TYPE_UPS,
+	POWER_SUPPLY_TYPE_MAINS,
+	POWER_SUPPLY_TYPE_USB,		/* Standard Downstream Port */
+	POWER_SUPPLY_TYPE_USB_DCP,	/* Dedicated Charging Port */
+	POWER_SUPPLY_TYPE_USB_CDP,	/* Charging Downstream Port */
+	POWER_SUPPLY_TYPE_USB_ACA,	/* Accessory Charger Adapters */
+#if defined(CONFIG_CHARGER_MAX77693_BAT)
+        POWER_SUPPLY_TYPE_MISC,
+        POWER_SUPPLY_TYPE_CARDOCK,
+        POWER_SUPPLY_TYPE_WIRELESS,	/* Wireless Charging should be 10 */
+        POWER_SUPPLY_TYPE_UARTOFF,
+        POWER_SUPPLY_TYPE_OTG,
+#else
+	POWER_SUPPLY_TYPE_DOCK,
+        POWER_SUPPLY_TYPE_MISC,
+        POWER_SUPPLY_TYPE_WIRELESS,     /* Wireless Charging should be 10 */
+        POWER_SUPPLY_TYPE_CARDOCK,
+        POWER_SUPPLY_TYPE_UARTOFF,
+        POWER_SUPPLY_TYPE_OTG,
+#endif
 };
+
+enum {
+	POWER_SUPPLY_VBUS_UNKNOWN = 0,
+	POWER_SUPPLY_VBUS_UVLO,
+	POWER_SUPPLY_VBUS_WEAK,
+	POWER_SUPPLY_VBUS_OVLO,
+	POWER_SUPPLY_VBUS_GOOD,
+};
+
+/*
+ * EXTENDED_ONLINE_TYPE
+ * - support various charger cable type
+ * - set type from each accessory driver(muic, host, mhl, etc,,,)
+ *
+ * - type format
+ * | 31-24: RSVD | 23-16: MAIN TYPE | 15-8: SUB TYPE | 7-0: POWER TYPE |
+ */
+#define ONLINE_TYPE_RSVD_SHIFT	24
+#define ONLINE_TYPE_RSVD_MASK	(0xF << ONLINE_TYPE_RSVD_SHIFT)
+#define ONLINE_TYPE_MAIN_SHIFT	16
+#define ONLINE_TYPE_MAIN_MASK	(0xF << ONLINE_TYPE_MAIN_SHIFT)
+#define ONLINE_TYPE_SUB_SHIFT	8
+#define ONLINE_TYPE_SUB_MASK	(0xF << ONLINE_TYPE_SUB_SHIFT)
+#define ONLINE_TYPE_PWR_SHIFT	0
+#define ONLINE_TYPE_PWR_MASK	(0xF << ONLINE_TYPE_PWR_SHIFT)
+
+enum online_sub_type {
+	ONLINE_SUB_TYPE_UNKNOWN	= 0,
+	ONLINE_SUB_TYPE_MHL,
+	ONLINE_SUB_TYPE_AUDIO,
+	ONLINE_SUB_TYPE_DESK,
+	ONLINE_SUB_TYPE_SMART_NOTG,
+	ONLINE_SUB_TYPE_SMART_OTG,
+	ONLINE_SUB_TYPE_KBD,
+};
+
+enum online_power_type {
+	ONLINE_POWER_TYPE_UNKNOWN = 0,
+	ONLINE_POWER_TYPE_BATTERY,
+	ONLINE_POWER_TYPE_TA,
+	ONLINE_POWER_TYPE_USB,
+	ONLINE_POWER_TYPE_MHL_500,
+	ONLINE_POWER_TYPE_MHL_900,
+	ONLINE_POWER_TYPE_MHL_1500,
+};
+/* EXTENDED_ONLINE_TYPE */
 
 union power_supply_propval {
 	int intval;
@@ -239,62 +284,23 @@ struct power_supply_info {
 	int use_for_apm;
 };
 
-#if defined(CONFIG_POWER_SUPPLY) || defined(CONFIG_POWER_SUPPLY_MODULE)
 extern struct power_supply *power_supply_get_by_name(char *name);
 extern void power_supply_changed(struct power_supply *psy);
 extern int power_supply_am_i_supplied(struct power_supply *psy);
 extern int power_supply_set_battery_charged(struct power_supply *psy);
 extern int power_supply_set_current_limit(struct power_supply *psy, int limit);
 extern int power_supply_set_online(struct power_supply *psy, bool enable);
-extern int power_supply_set_health_state(struct power_supply *psy, int health);
-extern int power_supply_set_present(struct power_supply *psy, bool enable);
-extern int power_supply_set_scope(struct power_supply *psy, int scope);
 extern int power_supply_set_charge_type(struct power_supply *psy, int type);
-extern int power_supply_set_supply_type(struct power_supply *psy,
-					enum power_supply_type supply_type);
+
+#if defined(CONFIG_POWER_SUPPLY) || defined(CONFIG_POWER_SUPPLY_MODULE)
 extern int power_supply_is_system_supplied(void);
+#else
+static inline int power_supply_is_system_supplied(void) { return -ENOSYS; }
+#endif
+
 extern int power_supply_register(struct device *parent,
 				 struct power_supply *psy);
 extern void power_supply_unregister(struct power_supply *psy);
-extern int power_supply_powers(struct power_supply *psy, struct device *dev);
-#else
-static inline struct power_supply *power_supply_get_by_name(char *name)
-							{ return NULL; }
-static inline void power_supply_changed(struct power_supply *psy) { }
-static inline int power_supply_am_i_supplied(struct power_supply *psy)
-							{ return -ENOSYS; }
-static inline int power_supply_set_battery_charged(struct power_supply *psy)
-							{ return -ENOSYS; }
-static inline int power_supply_set_current_limit(struct power_supply *psy,
-							int limit)
-							{ return -ENOSYS; }
-static inline int power_supply_set_online(struct power_supply *psy,
-							bool enable)
-							{ return -ENOSYS; }
-static inline int power_supply_set_health_state(struct power_supply *psy,
-							int health)
-							{ return -ENOSYS; }
-static inline int power_supply_set_present(struct power_supply *psy,
-							bool enable)
-							{ return -ENOSYS; }
-static inline int power_supply_set_scope(struct power_supply *psy,
-							int scope)
-							{ return -ENOSYS; }
-static inline int power_supply_set_charge_type(struct power_supply *psy,
-							int type)
-							{ return -ENOSYS; }
-static inline int power_supply_set_supply_type(struct power_supply *psy,
-					enum power_supply_type supply_type)
-							{ return -ENOSYS; }
-static inline int power_supply_is_system_supplied(void) { return -ENOSYS; }
-static inline int power_supply_register(struct device *parent,
-					struct power_supply *psy)
-							{ return -ENOSYS; }
-static inline void power_supply_unregister(struct power_supply *psy) { }
-static inline int power_supply_powers(struct power_supply *psy,
-				      struct device *dev)
-							{ return -ENOSYS; }
-#endif
 
 /* For APM emulation, think legacy userspace. */
 extern struct class *power_supply_class;
@@ -309,9 +315,7 @@ static inline bool power_supply_is_amp_property(enum power_supply_property psp)
 	case POWER_SUPPLY_PROP_CHARGE_NOW:
 	case POWER_SUPPLY_PROP_CHARGE_AVG:
 	case POWER_SUPPLY_PROP_CHARGE_COUNTER:
-	case POWER_SUPPLY_PROP_CHARGE_COUNTER_SHADOW:
 	case POWER_SUPPLY_PROP_CURRENT_MAX:
-	case POWER_SUPPLY_PROP_INPUT_CURRENT_MAX:
 	case POWER_SUPPLY_PROP_CURRENT_NOW:
 	case POWER_SUPPLY_PROP_CURRENT_AVG:
 		return 1;
@@ -337,7 +341,6 @@ static inline bool power_supply_is_watt_property(enum power_supply_property psp)
 	case POWER_SUPPLY_PROP_VOLTAGE_MIN_DESIGN:
 	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
 	case POWER_SUPPLY_PROP_VOLTAGE_AVG:
-	case POWER_SUPPLY_PROP_VOLTAGE_OCV:
 	case POWER_SUPPLY_PROP_POWER_NOW:
 		return 1;
 	default:

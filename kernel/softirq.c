@@ -10,7 +10,7 @@
  *	Remote softirq infrastructure is by Jens Axboe.
  */
 
-#include <linux/export.h>
+#include <linux/module.h>
 #include <linux/kernel_stat.h>
 #include <linux/interrupt.h>
 #include <linux/init.h>
@@ -29,10 +29,7 @@
 #include <trace/events/irq.h>
 
 #include <asm/irq.h>
-#ifdef CONFIG_SEC_DEBUG
 #include <mach/sec_debug.h>
-#endif
-
 /*
    - No shared variables, all the data are CPU local.
    - If a softirq needs serialization, let it serialize itself
@@ -239,13 +236,9 @@ restart:
 			kstat_incr_softirqs_this_cpu(vec_nr);
 
 			trace_softirq_entry(vec_nr);
-#ifdef CONFIG_SEC_DEBUG
-			secdbg_msg("softirq %pS entry", h->action);
-#endif
+			sec_debug_softirq_log(9999, h->action, 4);
 			h->action(h);
-#ifdef CONFIG_SEC_DEBUG
-			secdbg_msg("softirq %pS exit", h->action);
-#endif
+			sec_debug_softirq_log(9999, h->action, 5);
 			trace_softirq_exit(vec_nr);
 			if (unlikely(prev_count != preempt_count())) {
 				printk(KERN_ERR "huh, entered softirq %u %s %p"
@@ -307,7 +300,7 @@ void irq_enter(void)
 	int cpu = smp_processor_id();
 
 	rcu_irq_enter();
-	if (is_idle_task(current) && !in_interrupt()) {
+	if (idle_cpu(cpu) && !in_interrupt()) {
 		/*
 		 * Prevent raise_softirq from needlessly waking up ksoftirqd
 		 * here, as softirq will be serviced on return from interrupt.
@@ -320,21 +313,31 @@ void irq_enter(void)
 	__irq_enter();
 }
 
+#ifdef __ARCH_IRQ_EXIT_IRQS_DISABLED
 static inline void invoke_softirq(void)
 {
-	if (!force_irqthreads) {
-#ifdef __ARCH_IRQ_EXIT_IRQS_DISABLED
+	if (!force_irqthreads)
 		__do_softirq();
-#else
-		do_softirq();
-#endif
-	} else {
+	else {
 		__local_bh_disable((unsigned long)__builtin_return_address(0),
 				SOFTIRQ_OFFSET);
 		wakeup_softirqd();
 		__local_bh_enable(SOFTIRQ_OFFSET);
 	}
 }
+#else
+static inline void invoke_softirq(void)
+{
+	if (!force_irqthreads)
+		do_softirq();
+	else {
+		__local_bh_disable((unsigned long)__builtin_return_address(0),
+				SOFTIRQ_OFFSET);
+		wakeup_softirqd();
+		__local_bh_enable(SOFTIRQ_OFFSET);
+	}
+}
+#endif
 
 /*
  * Exit an interrupt context. Process softirqs if needed and possible:
@@ -343,21 +346,17 @@ void irq_exit(void)
 {
 	account_system_vtime(current);
 	trace_hardirq_exit();
-#ifdef CONFIG_SEC_DEBUG
-	secdbg_msg("hardirq exit");
-#endif
-
 	sub_preempt_count(IRQ_EXIT_OFFSET);
 	if (!in_interrupt() && local_softirq_pending())
 		invoke_softirq();
 
+	rcu_irq_exit();
 #ifdef CONFIG_NO_HZ
 	/* Make sure that timer wheel updates are propagated */
 	if (idle_cpu(smp_processor_id()) && !in_interrupt() && !need_resched())
-		tick_nohz_irq_exit();
+		tick_nohz_stop_sched_tick(0);
 #endif
-	rcu_irq_exit();
-	sched_preempt_enable_no_resched();
+	preempt_enable_no_resched();
 }
 
 /*
@@ -387,12 +386,6 @@ void raise_softirq(unsigned int nr)
 	local_irq_save(flags);
 	raise_softirq_irqoff(nr);
 	local_irq_restore(flags);
-}
-
-void __raise_softirq_irqoff(unsigned int nr)
-{
-	trace_softirq_raise(nr);
-	or_softirq_pending(1UL << nr);
 }
 
 void open_softirq(int nr, void (*action)(struct softirq_action *))
@@ -470,13 +463,9 @@ static void tasklet_action(struct softirq_action *a)
 			if (!atomic_read(&t->count)) {
 				if (!test_and_clear_bit(TASKLET_STATE_SCHED, &t->state))
 					BUG();
-#ifdef CONFIG_SEC_DEBUG
-				sec_debug_irq_sched_log(-1, t->func, 3);
+				sec_debug_softirq_log(9997, t->func, 4);
 				t->func(t->data);
-				sec_debug_irq_sched_log(-1, t->func, 4);
-#else
-				t->func(t->data);
-#endif
+				sec_debug_softirq_log(9997, t->func, 5);
 				tasklet_unlock(t);
 				continue;
 			}
@@ -511,7 +500,9 @@ static void tasklet_hi_action(struct softirq_action *a)
 			if (!atomic_read(&t->count)) {
 				if (!test_and_clear_bit(TASKLET_STATE_SCHED, &t->state))
 					BUG();
+				sec_debug_softirq_log(9998, t->func, 4);
 				t->func(t->data);
+				sec_debug_softirq_log(9998, t->func, 5);
 				tasklet_unlock(t);
 				continue;
 			}
@@ -760,7 +751,9 @@ static int run_ksoftirqd(void * __bind_cpu)
 	while (!kthread_should_stop()) {
 		preempt_disable();
 		if (!local_softirq_pending()) {
-			schedule_preempt_disabled();
+			preempt_enable_no_resched();
+			schedule();
+			preempt_disable();
 		}
 
 		__set_current_state(TASK_RUNNING);
@@ -775,7 +768,7 @@ static int run_ksoftirqd(void * __bind_cpu)
 			if (local_softirq_pending())
 				__do_softirq();
 			local_irq_enable();
-			sched_preempt_enable_no_resched();
+			preempt_enable_no_resched();
 			cond_resched();
 			preempt_disable();
 			rcu_note_context_switch((long)__bind_cpu);

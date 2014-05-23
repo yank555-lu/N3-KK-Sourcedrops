@@ -14,7 +14,7 @@
 
 #ifndef _LINUX_MMS_TOUCH_H
 #define _LINUX_MMS_TOUCH_H
-#define MELFAS_TS_NAME			"mms252-ts"
+#define MELFAS_TS_NAME			"melfas-ts"
 
 #define TOUCHKEY	1
 
@@ -24,28 +24,21 @@ struct melfas_tsi_platform_data {
 
 	bool invert_x;
 	bool invert_y;
-	bool i2c_pull_up;
-	int gpio_int;
-	u32 irq_gpio_flags;
-	int gpio_sda;
-	u32 sda_gpio_flags;
-	int gpio_scl;
-	u32 scl_gpio_flags;
-	int vdd_en;
-	int vdd_en2;
-	int tsp_vendor1;
-	int tsp_vendor2;
-	int tkey_led_en;
 
-	/*int (*mux_fw_flash) (bool to_gpios);
+	int gpio_int;
+	int gpio_sda;
+	int gpio_scl;
+	int (*mux_fw_flash) (bool to_gpios);
+	int (*power) (bool on);
 	int (*is_vdd_on) (void);
-	int (*power) (bool on);*/
-	const u8 *config_fw_version;
 	const char *fw_name;
 	bool use_touchkey;
 	const u8 *touchkey_keycode;
 	void (*input_event) (void *data);
 	void (*register_cb) (void *);
+#if TOUCHKEY
+	int (*keyled) (bool on);
+#endif
 	u8 panel;
 };
 extern struct class *sec_class;

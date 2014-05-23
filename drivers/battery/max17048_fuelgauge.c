@@ -17,7 +17,6 @@
  */
 
 #include <linux/battery/sec_fuelgauge.h>
-extern int poweroff_charging;
 #if 0
 static int max17048_write_reg(struct i2c_client *client, int reg, u8 value)
 {
@@ -193,43 +192,14 @@ static int max17048_get_current(struct i2c_client *client)
 	return value.intval;
 }
 
-#define DISCHARGE_SAMPLE_CNT 20
-static int discharge_cnt=0;
-static int all_vcell[20] = {0,};
-
-/* if ret < 0, discharge */
-static int sec_bat_check_discharge(int vcell)
-{
-	int i, cnt, ret = 0;
-
-	all_vcell[discharge_cnt++] = vcell;
-	if (discharge_cnt >= DISCHARGE_SAMPLE_CNT)
-		discharge_cnt = 0;
-
-	cnt = discharge_cnt;
-
-	/* check after last value is set */
-	if (all_vcell[cnt] == 0)
-		return 0;
-
-	for (i = 0; i < DISCHARGE_SAMPLE_CNT; i++) {
-		if (cnt == i)
-			continue;
-		if (all_vcell[cnt] > all_vcell[i])
-			ret--;
-		else
-			ret++;
-	}
-	return ret;
-}
-
 /* judge power off or not by current_avg */
 static int max17048_get_current_average(struct i2c_client *client)
 {
+	struct sec_fuelgauge_info *fuelgauge =
+				i2c_get_clientdata(client);
 	union power_supply_propval value_bat;
 	union power_supply_propval value_chg;
 	int vcell, soc, curr_avg;
-	int check_discharge;
 
 	psy_do_property("sec-charger", get,
 		POWER_SUPPLY_PROP_CURRENT_NOW, value_chg);
@@ -237,11 +207,9 @@ static int max17048_get_current_average(struct i2c_client *client)
 		POWER_SUPPLY_PROP_HEALTH, value_bat);
 	vcell = max17048_get_vcell(client);
 	soc = max17048_get_soc(client) / 100;
-	check_discharge = sec_bat_check_discharge(vcell);
 
 	/* if 0% && under 3.4v && low power charging(1000mA), power off */
-	if (!poweroff_charging && (soc <= 0) && (vcell < 3400) &&
-			(check_discharge < 0) &&
+	if (!fuelgauge->pdata->is_lpm() && (soc <= 0) && (vcell < 3400) &&
 			((value_chg.intval < 1000) ||
 			((value_bat.intval == POWER_SUPPLY_HEALTH_OVERHEAT) ||
 			(value_bat.intval == POWER_SUPPLY_HEALTH_COLD)))) {
@@ -253,15 +221,6 @@ static int max17048_get_current_average(struct i2c_client *client)
 	}
 
 	return curr_avg;
-}
-
-void sec_bat_reset_discharge(struct i2c_client *client)
-{
-	int i;
-
-	for (i = 0; i < DISCHARGE_SAMPLE_CNT ; i++)
-		all_vcell[i] = 0;
-	discharge_cnt = 0;
 }
 
 static void max17048_get_version(struct i2c_client *client)
@@ -346,69 +305,6 @@ static void max17048_rcomp_update(struct i2c_client *client, int temp)
 		max17048_set_rcomp(client, new_rcomp);
 	}
 }
-
-#ifdef CONFIG_OF
-#if 0
-static int max17048_parse_dt(struct device *dev,
-			     struct sec_fuelgauge_info *fuelgauge)
-{
-	struct device_node *np = dev->of_node;
-	int ret;
-	int value;
-
-	if (np == NULL) {
-		pr_err("%s np NULL\n", __func__);
-	} else {
-		ret = of_property_read_u32(np, "fuelgauge,rcomp0",
-					   &value);
-		pr_err("%s value %d\n",
-		       __func__, value);
-		get_battery_data(fuelgauge).RCOMP0 = (u8)value;
-		if (ret < 0)
-			pr_err("%s error reading rcomp0 %d\n",
-			       __func__, ret);
-		ret = of_property_read_u32(np, "fuelgauge,rcomp_charging",
-					   &value);
-		pr_err("%s value %d\n",
-		       __func__, value);
-		get_battery_data(fuelgauge).RCOMP_charging = (u8)value;
-		if (ret < 0)
-			pr_err("%s error reading rcomp_charging %d\n",
-			       __func__, ret);
-		ret = of_property_read_u32(np, "fuelgauge,temp_cohot",
-				   &get_battery_data(fuelgauge).temp_cohot);
-		if (ret < 0)
-			pr_err("%s error reading temp_cohot %d\n",
-			       __func__, ret);
-		ret = of_property_read_u32(np, "fuelgauge,temp_cocold",
-				   &get_battery_data(fuelgauge).temp_cocold);
-		if (ret < 0)
-			pr_err("%s error reading temp_cocold %d\n",
-			       __func__, ret);
-		get_battery_data(fuelgauge).is_using_model_data = of_property_read_bool(np,
-				"fuelgauge,is_using_model_data");
-		ret = of_property_read_string(np, "fuelgauge,type_str",
-				(const char **)&get_battery_data(fuelgauge).type_str);
-		if (ret < 0)
-			pr_err("%s error reading temp_cocold %d\n",
-			       __func__, ret);
-
-		pr_info("%s RCOMP0: 0x%x, RCOMP_charging: 0x%x, temp_cohot: %d,"
-			"temp_cocold: %d, is_using_model_data: %d, "
-			"type_str: %s,\n", __func__,
-			get_battery_data(fuelgauge).RCOMP0,
-			get_battery_data(fuelgauge).RCOMP_charging,
-			get_battery_data(fuelgauge).temp_cohot,
-			get_battery_data(fuelgauge).temp_cocold,
-			get_battery_data(fuelgauge).is_using_model_data,
-			get_battery_data(fuelgauge).type_str
-			);
-	}
-
-	return 0;
-}
-#endif
-#endif
 
 static void fg_read_regs(struct i2c_client *client, char *str)
 {
@@ -500,7 +396,6 @@ static void fg_read_all_regs(struct i2c_client *client)
 }
 
 /* read the specific address */
-#if 0
 static void fg_read_address(struct i2c_client *client)
 {
 	int data = 0;
@@ -544,30 +439,9 @@ static void fg_read_address(struct i2c_client *client)
 	str[strlen(str)] = '\0';
 	dev_info(&client->dev, "%s\n", str);
 }
-#endif
 
 bool sec_hal_fg_init(struct i2c_client *client)
 {
-#ifdef CONFIG_OF
-#if 1
-	struct sec_fuelgauge_info *fuelgauge =
-		i2c_get_clientdata(client);
-
-	board_fuelgauge_init(fuelgauge);
-#else
-	struct sec_fuelgauge_info *fuelgauge =
-		i2c_get_clientdata(client);
-	int error;
-
-	error = max17048_parse_dt(&client->dev, fuelgauge);
-
-	if (error) {
-		dev_err(&client->dev,
-			"%s : Failed to get max17048 fuel_init\n", __func__);
-		return false;
-	}
-#endif
-#endif
 	max17048_get_version(client);
 
 	return true;
@@ -664,7 +538,7 @@ bool sec_hal_fg_get_property(struct i2c_client *client,
 			val->intval = max17048_get_soc(client);
 		else
 			val->intval = max17048_get_soc(client) / 10;
-		/* fg_read_address(client); */
+		fg_read_address(client);
 		break;
 		/* Battery Temperature */
 	case POWER_SUPPLY_PROP_TEMP:
@@ -673,8 +547,6 @@ bool sec_hal_fg_get_property(struct i2c_client *client,
 		break;
 	case POWER_SUPPLY_PROP_MANUFACTURER:
 		fg_read_all_regs(client);
-		break;
-	case POWER_SUPPLY_PROP_ENERGY_NOW:
 		break;
 
 	default:
@@ -689,7 +561,6 @@ bool sec_hal_fg_set_property(struct i2c_client *client,
 {
 	switch (psp) {
 	case POWER_SUPPLY_PROP_ONLINE:
-		sec_bat_reset_discharge(client);
 		break;
 		/* Battery Temperature */
 	case POWER_SUPPLY_PROP_TEMP:

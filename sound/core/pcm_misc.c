@@ -20,7 +20,6 @@
  */
   
 #include <linux/time.h>
-#include <linux/export.h>
 #include <sound/core.h>
 #include <sound/pcm.h>
 #define SND_PCM_FORMAT_UNKNOWN (-1)
@@ -148,9 +147,7 @@ static struct pcm_format_data pcm_formats[(INT)SNDRV_PCM_FORMAT_LAST+1] = {
 		.le = -1, .signd = -1,
 	},
 	[SNDRV_PCM_FORMAT_SPECIAL] = {
-		/* set the width and phys same as S16_LE */
-		.width = 16, .phys = 16, .le = -1, .signd = -1,
-		.silence = {},
+		.le = -1, .signd = -1,
 	},
 	[SNDRV_PCM_FORMAT_S24_3LE] = {
 		.width = 24, .phys = 24, .le = 1, .signd = 1,

@@ -168,7 +168,6 @@ void ecryptfs_put_lower_file(struct inode *inode)
 	inode_info = ecryptfs_inode_to_private(inode);
 	if (atomic_dec_and_mutex_lock(&inode_info->lower_file_count,
 				      &inode_info->lower_file_mutex)) {
-		filemap_write_and_wait(inode->i_mapping);
 		fput(inode_info->lower_file);
 		inode_info->lower_file = NULL;
 		mutex_unlock(&inode_info->lower_file_mutex);
@@ -185,9 +184,6 @@ enum { ecryptfs_opt_sig, ecryptfs_opt_ecryptfs_sig,
        ecryptfs_opt_check_dev_ruid,
 #ifdef CONFIG_WTL_ENCRYPTION_FILTER
 	ecryptfs_opt_enable_filtering,
-#endif
-#ifdef CONFIG_CRYPTO_FIPS
-	ecryptfs_opt_enable_cc,
 #endif
        ecryptfs_opt_err };
 
@@ -208,9 +204,6 @@ static const match_table_t tokens = {
 	{ecryptfs_opt_check_dev_ruid, "ecryptfs_check_dev_ruid"},
 #ifdef CONFIG_WTL_ENCRYPTION_FILTER
 	{ecryptfs_opt_enable_filtering, "ecryptfs_enable_filtering=%s"},
-#endif
-#ifdef CONFIG_CRYPTO_FIPS
-	{ecryptfs_opt_enable_cc, "ecryptfs_enable_cc=%s"},
 #endif
 	{ecryptfs_opt_err, NULL}
 };
@@ -348,10 +341,6 @@ static int ecryptfs_parse_options(struct ecryptfs_sb_info *sbi, char *options,
 	char *fnek_src;
 	char *cipher_key_bytes_src;
 	char *fn_cipher_key_bytes_src;
-	u8 cipher_code;
-#ifdef CONFIG_CRYPTO_FIPS
-	char *cc_mode_src;
-#endif
 
 	*check_ruid = 0;
 
@@ -475,13 +464,6 @@ static int ecryptfs_parse_options(struct ecryptfs_sb_info *sbi, char *options,
 			mount_crypt_stat->flags |= ECRYPTFS_ENABLE_FILTERING;
 			break;
 #endif
-#ifdef CONFIG_CRYPTO_FIPS
-		case ecryptfs_opt_enable_cc:
-			cc_mode_src = args[0].from;
-			ecryptfs_cc_mode_set((int)simple_strtol(cc_mode_src,
-						   &cc_mode_src, 0));
-			break;
-#endif
 		case ecryptfs_opt_err:
 		default:
 			printk(KERN_WARNING
@@ -513,18 +495,6 @@ static int ecryptfs_parse_options(struct ecryptfs_sb_info *sbi, char *options,
 	    && !fn_cipher_key_bytes_set)
 		mount_crypt_stat->global_default_fn_cipher_key_bytes =
 			mount_crypt_stat->global_default_cipher_key_size;
-
-	cipher_code = ecryptfs_code_for_cipher_string(
-		mount_crypt_stat->global_default_cipher_name,
-		mount_crypt_stat->global_default_cipher_key_size);
-	if (!cipher_code) {
-		ecryptfs_printk(KERN_ERR,
-				"eCryptfs doesn't support cipher: %s",
-				mount_crypt_stat->global_default_cipher_name);
-		rc = -EINVAL;
-		goto out;
-	}
-
 	mutex_lock(&key_tfm_list_mutex);
 	if (!ecryptfs_tfm_exists(mount_crypt_stat->global_default_cipher_name,
 				 NULL)) {
@@ -610,6 +580,7 @@ static struct dentry *ecryptfs_mount(struct file_system_type *fs_type, int flags
 		goto out;
 	}
 
+	s->s_flags = flags;
 	rc = bdi_setup_and_register(&sbi->bdi, "ecryptfs", BDI_CAP_MAP_COPY);
 	if (rc)
 		goto out1;
@@ -645,15 +616,6 @@ static struct dentry *ecryptfs_mount(struct file_system_type *fs_type, int flags
 	}
 
 	ecryptfs_set_superblock_lower(s, path.dentry->d_sb);
-
-	/**
-	 * Set the POSIX ACL flag based on whether they're enabled in the lower
-	 * mount. Force a read-only eCryptfs mount if the lower mount is ro.
-	 * Allow a ro eCryptfs mount even when the lower mount is rw.
-	 */
-	s->s_flags = flags & ~MS_POSIXACL;
-	s->s_flags |= path.dentry->d_sb->s_flags & (MS_RDONLY | MS_POSIXACL);
-
 	s->s_maxbytes = path.dentry->d_sb->s_maxbytes;
 	s->s_blocksize = path.dentry->d_sb->s_blocksize;
 	s->s_magic = ECRYPTFS_SUPER_MAGIC;
@@ -663,8 +625,9 @@ static struct dentry *ecryptfs_mount(struct file_system_type *fs_type, int flags
 	if (IS_ERR(inode))
 		goto out_free;
 
-	s->s_root = d_make_root(inode);
+	s->s_root = d_alloc_root(inode);
 	if (!s->s_root) {
+		iput(inode);
 		rc = -ENOMEM;
 		goto out_free;
 	}
@@ -907,10 +870,15 @@ static int __init ecryptfs_init(void)
 		       "Failed to allocate one or more kmem_cache objects\n");
 		goto out;
 	}
+	rc = register_filesystem(&ecryptfs_fs_type);
+	if (rc) {
+		printk(KERN_ERR "Failed to register filesystem\n");
+		goto out_free_kmem_caches;
+	}
 	rc = do_sysfs_registration();
 	if (rc) {
 		printk(KERN_ERR "sysfs registration failed\n");
-		goto out_free_kmem_caches;
+		goto out_unregister_filesystem;
 	}
 	rc = ecryptfs_init_kthread();
 	if (rc) {
@@ -931,24 +899,19 @@ static int __init ecryptfs_init(void)
 		       "rc = [%d]\n", rc);
 		goto out_release_messaging;
 	}
-	rc = register_filesystem(&ecryptfs_fs_type);
-	if (rc) {
-		printk(KERN_ERR "Failed to register filesystem\n");
-		goto out_destroy_crypto;
-	}
 	if (ecryptfs_verbosity > 0)
 		printk(KERN_CRIT "eCryptfs verbosity set to %d. Secret values "
 			"will be written to the syslog!\n", ecryptfs_verbosity);
 
 	goto out;
-out_destroy_crypto:
-	ecryptfs_destroy_crypto();
 out_release_messaging:
 	ecryptfs_release_messaging();
 out_destroy_kthread:
 	ecryptfs_destroy_kthread();
 out_do_sysfs_unregistration:
 	do_sysfs_unregistration();
+out_unregister_filesystem:
+	unregister_filesystem(&ecryptfs_fs_type);
 out_free_kmem_caches:
 	ecryptfs_free_kmem_caches();
 out:
@@ -969,6 +932,7 @@ static void __exit ecryptfs_exit(void)
 	unregister_filesystem(&ecryptfs_fs_type);
 	ecryptfs_free_kmem_caches();
 }
+
 
 MODULE_AUTHOR("Michael A. Halcrow <mhalcrow@us.ibm.com>");
 MODULE_DESCRIPTION("eCryptfs");

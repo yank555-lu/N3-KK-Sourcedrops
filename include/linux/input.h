@@ -114,39 +114,14 @@ struct input_keymap_entry {
 #define EVIOCGUNIQ(len)		_IOC(_IOC_READ, 'E', 0x08, len)		/* get unique identifier */
 #define EVIOCGPROP(len)		_IOC(_IOC_READ, 'E', 0x09, len)		/* get device properties */
 
-/**
- * EVIOCGMTSLOTS(len) - get MT slot values
- *
- * The ioctl buffer argument should be binary equivalent to
- *
- * struct input_mt_request_layout {
- *	__u32 code;
- *	__s32 values[num_slots];
- * };
- *
- * where num_slots is the (arbitrary) number of MT slots to extract.
- *
- * The ioctl size argument (len) is the size of the buffer, which
- * should satisfy len = (num_slots + 1) * sizeof(__s32).  If len is
- * too small to fit all available slots, the first num_slots are
- * returned.
- *
- * Before the call, code is set to the wanted ABS_MT event type. On
- * return, values[] is filled with the slot values for the specified
- * ABS_MT code.
- *
- * If the request code is not an ABS_MT value, -EINVAL is returned.
- */
-#define EVIOCGMTSLOTS(len)	_IOC(_IOC_READ, 'E', 0x0a, len)
-
 #define EVIOCGKEY(len)		_IOC(_IOC_READ, 'E', 0x18, len)		/* get global key state */
 #define EVIOCGLED(len)		_IOC(_IOC_READ, 'E', 0x19, len)		/* get all LEDs */
 #define EVIOCGSND(len)		_IOC(_IOC_READ, 'E', 0x1a, len)		/* get all sounds status */
 #define EVIOCGSW(len)		_IOC(_IOC_READ, 'E', 0x1b, len)		/* get all switch states */
 
-#define EVIOCGBIT(ev,len)	_IOC(_IOC_READ, 'E', 0x20 + (ev), len)	/* get event bits */
-#define EVIOCGABS(abs)		_IOR('E', 0x40 + (abs), struct input_absinfo)	/* get abs value/limits */
-#define EVIOCSABS(abs)		_IOW('E', 0xc0 + (abs), struct input_absinfo)	/* set abs value/limits */
+#define EVIOCGBIT(ev,len)	_IOC(_IOC_READ, 'E', 0x20 + ev, len)	/* get event bits */
+#define EVIOCGABS(abs)		_IOR('E', 0x40 + abs, struct input_absinfo)	/* get abs value/limits */
+#define EVIOCSABS(abs)		_IOW('E', 0xc0 + abs, struct input_absinfo)	/* set abs value/limits */
 
 #define EVIOCSFF		_IOC(_IOC_WRITE, 'E', 0x80, sizeof(struct ff_effect))	/* send a force effect to a force feedback device */
 #define EVIOCRMFF		_IOW('E', 0x81, int)			/* Erase a force effect */
@@ -156,8 +131,6 @@ struct input_keymap_entry {
 
 #define EVIOCGSUSPENDBLOCK	_IOR('E', 0x91, int)			/* get suspend block enable */
 #define EVIOCSSUSPENDBLOCK	_IOW('E', 0x91, int)			/* set suspend block enable */
-
-#define EVIOCSCLOCKID		_IOW('E', 0xa0, int)			/* Set clockid to be used for timestamps */
 
 /*
  * Device properties and quirks
@@ -411,7 +384,9 @@ struct input_keymap_entry {
 #define KEY_F23			193
 #define KEY_F24			194
 
-#define KEY_VOICE_WAKEUP	199	/* Samsung Voice Wakeup */
+#define KEY_SYM			198
+#define KEY_CENTER		199
+
 #define KEY_PLAYCD		200
 #define KEY_PAUSECD		201
 #define KEY_PROG3		202
@@ -469,13 +444,27 @@ struct input_keymap_entry {
 #define KEY_WIMAX		246
 #define KEY_RFKILL		247	/* Key that controls all radios */
 
-#define KEY_MICMUTE		248	/* Mute / unmute the microphone */
+#define KEY_POUND		248
+#define KEY_STAR		249
+#define KEY_NETWORK		250
 
-#define KEY_DUMMY_HOME1		249	/* Dummy Touchkey : HOME1*/
-#define KEY_DUMMY_HOME2		250	/* Dummy Touchkey : HOME2*/
-#define KEY_DUMMY_MENU		251	/* Dummy Touchkey : MENU*/
-#define KEY_DUMMY_BACK		253	/* Dummy Touchkey : BACK*/
-#define KEY_RECENT	254	/* Key recent */
+#define KEY_FOLDER_OPEN		251  /*only use Grande CHN CTC */
+#define KEY_FOLDER_CLOSE	252  /*only use Grande CHN CTC */
+#define KEY_3G	253  /*only use Grande CHN CTC */
+
+/* Dummy touchkey code */
+#define KEY_DUMMY_HOME1		249
+#define KEY_DUMMY_HOME2		250
+#define KEY_DUMMY_MENU		251
+#define KEY_DUMMY_HOME		252
+#define KEY_DUMMY_BACK		253
+
+#define KEY_RECENT			254
+
+/* kona dummy touchkey */
+#define KEY_DUMMY_1     251
+#define KEY_DUMMY_2     252
+#define KEY_DUMMY_3     253
 
 /* Code 255 is reserved for special needs of AT keyboard driver */
 
@@ -543,7 +532,6 @@ struct input_keymap_entry {
 #define BTN_TOOL_FINGER		0x145
 #define BTN_TOOL_MOUSE		0x146
 #define BTN_TOOL_LENS		0x147
-#define BTN_TOOL_QUINTTAP	0x148	/* Five fingers on trackpad */
 #define BTN_TOUCH		0x14a
 #define BTN_STYLUS		0x14b
 #define BTN_STYLUS2		0x14c
@@ -699,7 +687,7 @@ struct input_keymap_entry {
 #define KEY_NUMERIC_9		0x209
 #define KEY_NUMERIC_STAR	0x20a
 #define KEY_NUMERIC_POUND	0x20b
-#define KEY_CAMERA_SNAPSHOT	0x2fe
+
 #define KEY_CAMERA_FOCUS	0x210
 #define KEY_WPS_BUTTON		0x211	/* WiFi Protected Setup key */
 
@@ -715,15 +703,29 @@ struct input_keymap_entry {
 #define KEY_CAMERA_RIGHT	0x21a
 
 #define KEY_DMB_ANT_DET_UP		0x21b
-#define KEY_DMB_ANT_DET_DOWN		0x21c
+#define KEY_DMB_ANT_DET_DOWN	0x21c
 
+#define KEY_CAMERA_SHUTTER		0x220
+#define KEY_CAMERA_JOG_L   			0x221
+#define KEY_CAMERA_JOG_R   		0x222
+#define KEY_CAMERA_STROBE			0x223
 
-#define KEY_NET_SEL			0x220
-#define KEY_NET_3G			0x221
-#define KEY_TKEY_WAKEUP		0x222
+#define KEY_ZOOM_RING_MOVE			0x224
+#define KEY_ZOOM_RING_IN			0x225
+#define KEY_ZOOM_RING_OUT			0x226
+#define KEY_ZOOM_RING_SPEED1		0x231
+#define KEY_ZOOM_RING_SPEED2		0x232
+#define KEY_ZOOM_RING_SPEED3		0x233
+#define KEY_ZOOM_RING_SPEED4		0x234
+
+#define KEY_CAMERA_IFUNC			0x227
+#define KEY_CAMERA_FOCUS_L		0x228
+#define KEY_CAMERA_FOCUS_R		0x229
 
 #define KEY_PEN_PDCT		0x230 /* E-PEN PDCT flag*/
+
 #define KEY_FAKE_PWR		0x240 /* Fake Power off flag*/
+
 
 #define BTN_TRIGGER_HAPPY		0x2c0
 #define BTN_TRIGGER_HAPPY1		0x2c0
@@ -731,7 +733,7 @@ struct input_keymap_entry {
 #define BTN_TRIGGER_HAPPY3		0x2c2
 #define BTN_TRIGGER_HAPPY4		0x2c3
 #define BTN_TRIGGER_HAPPY5		0x2c4
-#define BTN_TRIGGER_HAPPY6		0x2c5 /* For Samsung S Action Mouse button */
+#define BTN_TRIGGER_HAPPY6		0x2c5
 #define BTN_TRIGGER_HAPPY7		0x2c6
 #define BTN_TRIGGER_HAPPY8		0x2c7
 #define BTN_TRIGGER_HAPPY9		0x2c8
@@ -766,21 +768,6 @@ struct input_keymap_entry {
 #define BTN_TRIGGER_HAPPY38		0x2e5
 #define BTN_TRIGGER_HAPPY39		0x2e6
 #define BTN_TRIGGER_HAPPY40		0x2e7
-
-/* SAMSUNG
- * 0	 3
- * 1	 4
- * 2	 5
- */
-#define KEY_SIDE_TOUCH_0		0x2e8
-#define KEY_SIDE_TOUCH_1		0x2e9
-#define KEY_SIDE_TOUCH_2		0x2ea
-#define KEY_SIDE_TOUCH_3		0x2eb
-#define KEY_SIDE_TOUCH_4		0x2ec
-#define KEY_SIDE_TOUCH_5		0x2ed
-#define KEY_SIDE_TOUCH_6		0x2ee
-#define KEY_SIDE_TOUCH_7		0x2ef
-#define KEY_SIDE_CAMERA_DETECTED	0x2f0
 
 /* We avoid low common keys in module aliases so they don't get huge. */
 #define KEY_MIN_INTERESTING	KEY_MUTE
@@ -883,20 +870,10 @@ struct input_keymap_entry {
 #define SW_KEYPAD_SLIDE		0x0a  /* set = keypad slide out */
 #define SW_FRONT_PROXIMITY	0x0b  /* set = front proximity sensor active */
 #define SW_ROTATE_LOCK		0x0c  /* set = rotate locked/disabled */
-#define SW_LINEIN_INSERT	0x0d  /* set = inserted */
-#define SW_HPHL_OVERCURRENT    0x0e  /* set = over current on left hph */
-#define SW_HPHR_OVERCURRENT    0x0f  /* set = over current on right hph */
-#define SW_UNSUPPORT_INSERT	0x10  /* set = unsupported device inserted */
-#define SW_FLIP			0x15  /* set = flip cover */
-#define SW_PEN_INSERT		0x13
-#define SW_STROBE_INSERT	0x14
+#define SW_PEN_INSERT			0x13	/* set = pen out */
+#define SW_STROBE_INSERT		0x0f	/* set = strobe out */
 #define SW_FLIP			0x15  /* set = flip cover... */
-#define SW_GLOVE		0x16	/* set = glove mode */
-#define SW_LEFT_HAND	0x17	/* set = left hand*/
-#define SW_RIGHT_HAND	0x18	/* set = right hand*/
-#define SW_BOTH_HAND	0x19	/* set = both hand*/
-
-#define SW_MAX			0x20
+#define SW_MAX			0x17
 #define SW_CNT			(SW_MAX+1)
 
 /*
@@ -977,6 +954,8 @@ struct input_keymap_entry {
 #define BUS_GSC			0x1A
 #define BUS_ATARI		0x1B
 #define BUS_SPI			0x1C
+
+#define BUS_RMI         0x1D
 
 /*
  * MT_TOOL types
@@ -1360,9 +1339,7 @@ struct input_dev {
 	struct mutex mutex;
 
 	unsigned int users;
-	unsigned int users_private;
 	bool going_away;
-	bool disabled;
 
 	bool sync;
 
@@ -1693,7 +1670,7 @@ struct ff_device {
 	struct file *effect_owners[];
 };
 
-int input_ff_create(struct input_dev *dev, unsigned int max_effects);
+int input_ff_create(struct input_dev *dev, int max_effects);
 void input_ff_destroy(struct input_dev *dev);
 
 int input_ff_event(struct input_dev *dev, unsigned int type, unsigned int code, int value);

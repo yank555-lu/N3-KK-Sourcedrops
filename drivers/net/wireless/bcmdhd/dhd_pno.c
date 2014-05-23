@@ -22,8 +22,9 @@
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
  *
- * $Id: dhd_pno.c 435029 2013-11-08 02:47:59Z $
+ * $Id: dhd_pno.c 423669 2013-09-18 13:01:55Z yangj$
  */
+#ifdef PNO_SUPPORT
 #include <typedefs.h>
 #include <osl.h>
 
@@ -91,7 +92,6 @@ is_dfs(uint16 channel)
 	else
 		return FALSE;
 }
-
 int
 dhd_pno_clean(dhd_pub_t *dhd)
 {
@@ -1882,3 +1882,4 @@ int dhd_pno_deinit(dhd_pub_t *dhd)
 	dhd->pno_state = NULL;
 	return err;
 }
+#endif /* PNO_SUPPORT */

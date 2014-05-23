@@ -19,16 +19,12 @@
 #ifndef _SSP_PLATFORMDATA_H_
 #define _SSP_PLATFORMDATA_H_
 
-/* Change revision */
-#define SSP_MCU_L0	0
-#define SSP_MCU_L5	1
-
 /* POSITION VALUES */
 /* K330 */
-#define K330_TOP_LEFT_UPPER			3
-#define K330_TOP_RIGHT_UPPER			0
-#define K330_TOP_RIGHT_LOWER			1
-#define K330_TOP_LEFT_LOWER			2
+#define K330_TOP_LEFT_UPPER		3
+#define K330_TOP_RIGHT_UPPER		0
+#define K330_TOP_RIGHT_LOWER		1
+#define K330_TOP_LEFT_LOWER		2
 #define K330_BOTTOM_LEFT_UPPER		5
 #define K330_BOTTOM_RIGHT_UPPER		4
 #define K330_BOTTOM_RIGHT_LOWER		7
@@ -52,27 +48,14 @@
 #define YAS532_BOTTOM_RIGHT_LOWER	5
 #define YAS532_BOTTOM_LEFT_LOWER	4
 
-#ifdef CONFIG_SENSORS_SSP_SHTC1
-/**
- * struct cp_thm_adc_table - adc to temperature table for PAM thermistor
- * driver
- * @adc: adc value
- * @temperature: temperature(C) * 10
- */
-struct cp_thm_adc_table {
-	unsigned int adc;
-	int temperature;
-};
-#endif
-
 struct ssp_platform_data {
 	int (*wakeup_mcu)(void);
 	int (*check_mcu_ready)(void);
 	int (*check_mcu_busy)(void);
 	int (*set_mcu_reset)(int);
 	int (*check_ap_rev)(void);
-	int (*read_chg)(void);
-	int (*check_changes)(void);
+#ifdef CONFIG_SENSORS_SSP_STM
 	void (*get_positions)(int *, int *);
+#endif
 };
 #endif

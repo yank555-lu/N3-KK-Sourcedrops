@@ -17,7 +17,7 @@
  *  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
- #ifndef _LINUX_WACOM_I2C_FUNC_H
+#ifndef _LINUX_WACOM_I2C_FUNC_H
 #define _LINUX_WACOM_I2C_FUNC_H
 
 #ifdef CONFIG_SEC_TOUCHSCREEN_DVFS_LOCK
@@ -52,16 +52,6 @@ extern int wacom_i2c_send(struct wacom_i2c *wac_i2c,
 			  const char *buf, int count, bool mode);
 extern int wacom_i2c_recv(struct wacom_i2c *wac_i2c,
 			char *buf, int count, bool mode);
-
-extern int wacom_i2c_write(struct i2c_client *client,
-			const char *buf, int count, unsigned char addr);
-extern int wacom_i2c_read(struct i2c_client *client,
-			const char *buf, int count, unsigned char addr);
-
-#ifdef USE_WACOM_LCD_WORKAROUND
-extern void wacom_i2c_write_vsync(struct wacom_i2c *wac_i2c);
-#endif
-
 extern int wacom_i2c_test(struct wacom_i2c *wac_i2c);
 extern int wacom_i2c_coord(struct wacom_i2c *wac_i2c);
 extern int wacom_i2c_query(struct wacom_i2c *wac_i2c);
@@ -71,9 +61,12 @@ extern void forced_release(struct wacom_i2c *wac_i2c);
 extern void forced_hover(struct wacom_i2c *wac_i2c);
 #endif
 
-#ifdef WACOM_BOOSTER
-extern void wacom_set_dvfs_lock(struct wacom_i2c *wac_i2c, int on);
-extern void wacom_init_dvfs(struct wacom_i2c *wac_i2c);
+#ifdef WACOM_IRQ_WORK_AROUND
+extern void wacom_i2c_pendct_work(struct work_struct *work);
+#endif
+
+#ifdef CONFIG_SEC_TOUCHSCREEN_DVFS_LOCK
+extern void free_dvfs_lock(struct work_struct *work);
 #endif
 
 #endif	/* _LINUX_WACOM_I2C_FUNC_H */

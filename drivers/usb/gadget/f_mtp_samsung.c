@@ -50,6 +50,7 @@
 #include <linux/sched.h>
 #include <linux/usb/f_accessory.h>
 #include <asm-generic/siginfo.h>
+#include <linux/usb/android_composite.h>
 #include <linux/kernel.h>
 #include "f_mtp.h"
 #include "gadget_chips.h"
@@ -92,12 +93,12 @@
 #endif
 /*-------------------------------------------------------------------------*/
 
-#define MTPG_BULK_BUFFER_SIZE	16384
+#define MTPG_BULK_BUFFER_SIZE	32768
 #define MTPG_INTR_BUFFER_SIZE	28
 
 /* number of rx and tx requests to allocate */
-#define MTPG_RX_REQ_MAX			4
-#define MTPG_MTPG_TX_REQ_MAX		4
+#define MTPG_RX_REQ_MAX				8
+#define MTPG_MTPG_TX_REQ_MAX		8
 #define MTPG_INTR_REQ_MAX	5
 
 /* ID for Microsoft MTP OS String */
@@ -183,31 +184,6 @@ static struct usb_interface_descriptor ptp_interface_desc = {
 	.bInterfaceProtocol     = 1,
 };
 
-static struct usb_endpoint_descriptor mtpg_superspeed_in_desc = {
-	.bLength                = USB_DT_ENDPOINT_SIZE,
-	.bDescriptorType        = USB_DT_ENDPOINT,
-	.bEndpointAddress       = USB_DIR_IN,
-	.bmAttributes           = USB_ENDPOINT_XFER_BULK,
-	.wMaxPacketSize         = __constant_cpu_to_le16(1024),
-};
-
-static struct usb_endpoint_descriptor mtpg_superspeed_out_desc = {
-	.bLength                = USB_DT_ENDPOINT_SIZE,
-	.bDescriptorType        = USB_DT_ENDPOINT,
-	.bEndpointAddress       = USB_DIR_OUT,
-	.bmAttributes           = USB_ENDPOINT_XFER_BULK,
-	.wMaxPacketSize         = __constant_cpu_to_le16(1024),
-};
-
-static struct usb_ss_ep_comp_descriptor mtpg_superspeed_bulk_comp_desc = {
-	.bLength =              sizeof mtpg_superspeed_bulk_comp_desc,
-	.bDescriptorType =      USB_DT_SS_ENDPOINT_COMP,
-
-	/* the following 2 values can be tweaked if necessary */
-	/* .bMaxBurst =         0, */
-	/* .bmAttributes =      0, */
-};
-
 static struct usb_endpoint_descriptor fs_mtpg_in_desc = {
 	.bLength =		USB_DT_ENDPOINT_SIZE,
 	.bDescriptorType =	USB_DT_ENDPOINT,
@@ -269,44 +245,12 @@ static struct usb_endpoint_descriptor int_hs_notify_desc = {
 	.bInterval =		6,
 };
 
-static struct usb_ss_ep_comp_descriptor ss_intr_notify_desc = {
-	.bLength =		sizeof ss_intr_notify_desc,
-	.bDescriptorType =	USB_DT_SS_ENDPOINT_COMP,
-
-	/* the following 3 values can be tweaked if necessary */
-	/* .bMaxBurst =		0, */
-	/* .bmAttributes =	0, */
-	.wBytesPerInterval =	__constant_cpu_to_le16(MTPG_INTR_BUFFER_SIZE),
-};
-
-static struct usb_descriptor_header *ss_mtpg_descs[] = {
-	(struct usb_descriptor_header *) &mtpg_interface_desc,
-	(struct usb_descriptor_header *) &mtpg_superspeed_in_desc,
-	(struct usb_descriptor_header *) &mtpg_superspeed_bulk_comp_desc,
-	(struct usb_descriptor_header *) &mtpg_superspeed_out_desc,
-	(struct usb_descriptor_header *) &mtpg_superspeed_bulk_comp_desc,
-	(struct usb_descriptor_header *) &int_hs_notify_desc,
-	(struct usb_descriptor_header *) &ss_intr_notify_desc,
-	NULL,
-};
-
 static struct usb_descriptor_header *hs_mtpg_desc[] = {
 	(struct usb_descriptor_header *) &mtpg_interface_desc,
 	(struct usb_descriptor_header *) &hs_mtpg_in_desc,
 	(struct usb_descriptor_header *) &hs_mtpg_out_desc,
 	(struct usb_descriptor_header *) &int_hs_notify_desc,
 	NULL
-};
-
-static struct usb_descriptor_header *ss_ptpg_descs[] = {
-	(struct usb_descriptor_header *) &ptp_interface_desc,
-	(struct usb_descriptor_header *) &mtpg_superspeed_in_desc,
-	(struct usb_descriptor_header *) &mtpg_superspeed_bulk_comp_desc,
-	(struct usb_descriptor_header *) &mtpg_superspeed_out_desc,
-	(struct usb_descriptor_header *) &mtpg_superspeed_bulk_comp_desc,
-	(struct usb_descriptor_header *) &int_hs_notify_desc,
-	(struct usb_descriptor_header *) &ss_intr_notify_desc,
-	NULL,
 };
 
 static struct usb_descriptor_header *fs_ptp_descs[] = {
@@ -773,7 +717,12 @@ static ssize_t mtpg_write(struct file *fp, const char __user *buf,
 					 __func__, __LINE__, r);
 	return r;
 }
-
+/*
+static void interrupt_complete(struct usb_ep *ep, struct usb_request *req)
+{
+	printk(KERN_DEBUG "Finished Writing Interrupt Data\n");
+}
+*/
 static ssize_t interrupt_write(struct file *fd,
 			const char __user *buf, size_t count)
 {
@@ -820,6 +769,7 @@ static void read_send_work(struct work_struct *work)
 {
 	struct mtpg_dev	*dev = container_of(work, struct mtpg_dev,
 							read_send_work);
+	//struct usb_composite_dev *cdev = dev->cdev;
 	struct usb_request *req = 0;
 	struct usb_container_header *hdr;
 	struct file *file;
@@ -868,6 +818,11 @@ static void read_send_work(struct work_struct *work)
 			r = ret;
 			printk(KERN_DEBUG "[%s]\t%d ret = %d\n",
 						__func__, __LINE__, r);
+			break;
+		}
+
+		if (!req) {
+			printk(KERN_ERR "[%s]Alloc has failed\n", __func__);
 			break;
 		}
 
@@ -1351,19 +1306,6 @@ mtpg_function_bind(struct usb_configuration *c, struct usb_function *f)
 				int_fs_notify_desc.bEndpointAddress;
 	}
 
-	if (gadget_is_superspeed(c->cdev->gadget)) {
-		DEBUG_MTPB("[%s]\tdual speed line = [%d]\n",
-						__func__, __LINE__);
-		mtpg_superspeed_in_desc.bEndpointAddress =
-				fs_mtpg_in_desc.bEndpointAddress;
-		mtpg_superspeed_out_desc.bEndpointAddress =
-				fs_mtpg_out_desc.bEndpointAddress;
-	}
-	printk("%s speed %s: IN/%s, OUT/%s\n",
-			gadget_is_superspeed(c->cdev->gadget) ? "super" :
-			gadget_is_dualspeed(c->cdev->gadget) ? "dual" : "full",
-			f->name, mtpg->bulk_in->name, mtpg->bulk_out->name);
-
 	mtpg->cdev = cdev;
 	the_mtpg->cdev = cdev;
 
@@ -1387,47 +1329,43 @@ static int mtpg_function_set_alt(struct usb_function *f,
 	if (dev->int_in->driver_data)
 		usb_ep_disable(dev->int_in);
 
-	ret = config_ep_by_speed(cdev->gadget, f, dev->int_in);
+	ret = usb_ep_enable(dev->int_in,
+			ep_choose(cdev->gadget, &int_hs_notify_desc,
+						&int_fs_notify_desc));
 	if (ret) {
-		dev->int_in->desc = NULL;
-		ERROR(cdev, "config_ep_by_speed failes for ep %s, result %d\n",
-			dev->int_in->name, ret);
-		return ret;
-	}
-	ret = usb_ep_enable(dev->int_in);
-	if (ret) {
-		ERROR(cdev, "failed to enable ep %s, result %d\n",
-			dev->int_in->name, ret);
+		usb_ep_disable(dev->int_in);
+		dev->int_in->driver_data = NULL;
+		printk(KERN_ERR "[%s]Error in enabling INT EP\n", __func__);
 		return ret;
 	}
 	dev->int_in->driver_data = dev;
 
-	ret = config_ep_by_speed(cdev->gadget, f, dev->bulk_in);
+	if (dev->bulk_in->driver_data)
+		usb_ep_disable(dev->bulk_in);
+
+	ret = usb_ep_enable(dev->bulk_in,
+			ep_choose(cdev->gadget, &hs_mtpg_in_desc,
+						&fs_mtpg_in_desc));
 	if (ret) {
-		dev->bulk_in->desc = NULL;
-		ERROR(cdev, "config_ep_by_speed failes for ep %s, result %d\n",
-			dev->bulk_in->name, ret);
-		return ret;
-	}
-	ret = usb_ep_enable(dev->bulk_in);
-	if (ret) {
-		ERROR(cdev, "failed to enable ep %s, result %d\n",
-			dev->bulk_in->name, ret);
-		return ret;
+		usb_ep_disable(dev->bulk_in);
+		dev->bulk_in->driver_data = NULL;
+		 printk(KERN_ERR "[%s] Enable Bulk-IN EP error%d\n",
+							__func__, __LINE__);
+		 return ret;
 	}
 	dev->bulk_in->driver_data = dev;
 
-	ret = config_ep_by_speed(cdev->gadget, f, dev->bulk_out);
+	if (dev->bulk_out->driver_data)
+		usb_ep_disable(dev->bulk_out);
+
+	ret = usb_ep_enable(dev->bulk_out,
+			ep_choose(cdev->gadget, &hs_mtpg_out_desc,
+						&fs_mtpg_out_desc));
 	if (ret) {
-		dev->bulk_out->desc = NULL;
-		ERROR(cdev, "config_ep_by_speed failes for ep %s, result %d\n",
-			dev->bulk_out->name, ret);
-		return ret;
-	}
-	ret = usb_ep_enable(dev->bulk_out);
-	if (ret) {
-		ERROR(cdev, "failed to enable ep %s, result %d\n",
-			dev->bulk_out->name, ret);
+		usb_ep_disable(dev->bulk_out);
+		dev->bulk_out->driver_data = NULL;
+		 printk(KERN_ERR "[%s] Enable Bulk-Out EP error%d\n",
+							__func__, __LINE__);
 		return ret;
 	}
 	dev->bulk_out->driver_data = dev;
@@ -1631,13 +1569,9 @@ static int mtp_bind_config(struct usb_configuration *c, bool ptp_config)
 	if (ptp_config) {
 		mtpg->function.descriptors = fs_ptp_descs;
 		mtpg->function.hs_descriptors = hs_ptp_descs;
-		if (gadget_is_superspeed(c->cdev->gadget))
-			mtpg->function.ss_descriptors = ss_ptpg_descs;
 	} else {
 		mtpg->function.descriptors = fs_mtpg_desc;
 		mtpg->function.hs_descriptors = hs_mtpg_desc;
-		if (gadget_is_superspeed(c->cdev->gadget))
-			mtpg->function.ss_descriptors = ss_mtpg_descs;
 	}
 
 	mtpg->function.bind = mtpg_function_bind;

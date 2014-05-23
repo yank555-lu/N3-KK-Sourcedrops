@@ -286,7 +286,6 @@ other_file_show(struct kobject *kobj,
 	 * Fall back on default - this may bias strangely for/against the host,
 	 * but nothing catastrophic should result.
 	 */
-	 /* other_file = global_page_state(NR_FILE_PAGES); */
 	 other_file = global_page_state(NR_FILE_PAGES) - global_page_state(NR_SHMEM);
 #endif
 

@@ -17,7 +17,7 @@
 #define DEBUG
 /* #define VERBOSE_DEBUG */
 #define SEC_TSP_DEBUG
-#define USE_OPEN_CLOSE
+
 /* #define FORCE_FW_FLASH */
 /* #define FORCE_FW_PASS */
 /* #define ESD_DEBUG */
@@ -33,25 +33,18 @@
 #include <linux/init.h>
 #include <linux/input.h>
 #include <linux/input/mt.h>
-#include <linux/cdev.h>
 #include <linux/interrupt.h>
 #include <linux/irq.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/slab.h>
-#include <linux/mfd/pm8xxx/gpio.h>
+#include <mach/gpio.h>
 #include <linux/uaccess.h>
-#include <linux/cpufreq.h>
-#include <asm/mach-types.h>
-#include <linux/delay.h>
-#ifdef TOUCH_BOOSTER
-#include <mach/cpufreq.h>
-#endif
-/* #include <mach/dev.h> */
 
-#include <linux/regulator/consumer.h>
+#include <mach/cpufreq.h>
+#include <mach/dev.h>
+
 #include <linux/i2c/mms252.h>
-#include <linux/of_gpio.h>
 
 #include <asm/unaligned.h>
 
@@ -115,37 +108,6 @@
 #define TSP_CMD_PARAM_NUM 8
 #endif /* SEC_TSP_FACTORY_TEST */
 
-/* START - Added to support API's for TSP tuning */
-#define ESD_DETECT_COUNT		10
-#define FINGER_EVENT_SZ			6
-#define MAX_LOG_LENGTH			128
-#define MMS_EVENT_PKT_SZ		0x0F
-
-/* Universal commands */
-#define MMS_CMD_SET_LOG_MODE		0x20
-
-/* Event types */
-#define MMS_LOG_EVENT			0xD
-#define MMS_NOTIFY_EVENT		0xE
-#define MMS_ERROR_EVENT			0xF
-#define MMS_TOUCH_KEY_EVENT		0x40
-
-enum {
-	GET_RX_NUM	= 1,
-	GET_TX_NUM,
-	GET_EVENT_DATA,
-};
-
-enum {
-	LOG_TYPE_U08	= 2,
-	LOG_TYPE_S08,
-	LOG_TYPE_U16,
-	LOG_TYPE_S16,
-	LOG_TYPE_U32	= 8,
-	LOG_TYPE_S32,
-};
-/* END - Added to support API's for TSP tuning */
-
 /* Touch booster */
 #if defined(CONFIG_EXYNOS4_CPUFREQ) &&\
 	defined(CONFIG_BUSFREQ_OPP)
@@ -155,14 +117,12 @@ enum {
 #else
 #define TOUCH_BOOSTER			0
 #endif
-extern int poweroff_charging;
+
 struct device *sec_touchscreen;
 struct device *sec_touchkey;
-#if TOUCH_BOOSTER
 static struct device *bus_dev;
-#endif
+
 int touch_is_pressed;
-static int tsp_power_enabled;
 
 /* panel info */
 #define ILJIN 0x0
@@ -171,22 +131,31 @@ static int tsp_power_enabled;
 #define YONGFAST 0x8
 #define WINTEC 0x9
 
+/* YongFast panel */
+#define BOOT_VERSION_YF 0x1
+#define CORE_VERSION_YF 0x71
+#define FW_VERSION_YF 0x11
+
+/* WINTEC panel */
+#define BOOT_VERSION_WT 0x1
+#define CORE_VERSION_WT 0x71
+#define FW_VERSION_WT 0x8
+
 /* ILJIN panel */
 #define BOOT_VERSION_IJ 0x1
 #define CORE_VERSION_IJ 0x73
-#define FW_VERSION_IJ 0x17
+#define FW_VERSION_IJ 0x16
 
 /* EELY panel */
 #define BOOT_VERSION_EL 0x1
-#define CORE_VERSION_EL 0x74
-#define FW_VERSION_EL 0x2
+#define CORE_VERSION_EL 0x73
+#define FW_VERSION_EL 0x16
 
 #define MAX_FW_PATH 255
 #define TSP_FW_FILENAME "melfas_fw.bin"
-#define MMS_COORDS_ARR_SIZE	4
 #define SECTION_NUM		3
 
-#define ISC_XFER_LEN		256
+#define ISC_XFER_LEN		1024
 #define MMS_FLASH_PAGE_SZ	1024
 #define ISC_BLOCK_NUM		(MMS_FLASH_PAGE_SZ / ISC_XFER_LEN)
 
@@ -258,11 +227,8 @@ struct mms_ts_info {
 	bool invert_y;
 	u8 palm_flag;
 	int irq;
-	int (*power) (struct mms_ts_info *info,int on);
+	int (*power) (bool on);
 	void (*input_event)(void *data);
-#if TOUCHKEY
-	int (*keyled) (struct mms_ts_info *info,int on);
-#endif
 #ifdef CONFIG_HAS_EARLYSUSPEND
 	struct early_suspend early_suspend;
 #endif
@@ -319,15 +285,6 @@ struct mms_ts_info {
 	unsigned int intensity[NODE_NUM];
 	bool ft_flag;
 #endif				/* SEC_TSP_FACTORY_TEST */
-
-	struct cdev			cdev;
-	dev_t				mms_dev;
-	struct class			*class;
-
-	struct mms_log_data {
-		u8			*data;
-		int			cmd;
-	} log;
 };
 
 struct mms_bin_hdr {
@@ -381,8 +338,6 @@ struct mms_fw_image {
 static void mms_ts_early_suspend(struct early_suspend *h);
 static void mms_ts_late_resume(struct early_suspend *h);
 #endif
-static int mms_ts_resume(struct device *dev);
-static int mms_ts_suspend(struct device *dev);
 
 #if defined(SEC_TSP_FACTORY_TEST)
 #define TSP_CMD(name, func) .cmd_name = name, .cmd_func = func
@@ -392,8 +347,6 @@ struct tsp_cmd {
 	const char	*cmd_name;
 	void	(*cmd_func)(void *device_data);
 };
-
-extern unsigned int system_rev;
 
 static void fw_update(void *device_data);
 static void get_fw_ver_bin(void *device_data);
@@ -482,7 +435,6 @@ static void set_dvfs_off(struct work_struct *work)
 	mutex_unlock(&info->dvfs_lock);
 	}
 
-
 static void set_dvfs_lock(struct mms_ts_info *info, uint32_t on)
 {
 	int ret;
@@ -537,24 +489,24 @@ static inline void mms_pwr_on_reset(struct mms_ts_info *info)
 {
 	struct i2c_adapter *adapter = to_i2c_adapter(info->client->dev.parent);
 
-/*	if (!info->pdata->mux_fw_flash) {
+	if (!info->pdata->mux_fw_flash) {
 		dev_info(&info->client->dev,
 			 "missing platform data, can't do power-on-reset\n");
 		return;
 	}
-*/
-	i2c_lock_adapter(adapter);
-//	info->pdata->mux_fw_flash(true);
 
-	//info->pdata->power(0);
+	i2c_lock_adapter(adapter);
+	info->pdata->mux_fw_flash(true);
+
+	info->pdata->power(0);
 	gpio_direction_output(info->pdata->gpio_sda, 0);
 	gpio_direction_output(info->pdata->gpio_scl, 0);
 	gpio_direction_output(info->pdata->gpio_int, 0);
 	msleep(50);
-	//info->pdata->power(1);
+	info->pdata->power(1);
 	msleep(100);
 
-//	info->pdata->mux_fw_flash(false);
+	info->pdata->mux_fw_flash(false);
 	i2c_unlock_adapter(adapter);
 
 	/* TODO: Seems long enough for the firmware to boot.
@@ -625,9 +577,10 @@ static void mms_set_threewave_mode(struct mms_ts_info *info)
 static int mms_reset(struct mms_ts_info *info)
 {
 	printk(KERN_ERR" %s excute\n", __func__);
-	info->power(info,0);
+
+	info->pdata->power(false);
 	msleep(150);
-	info->power(info,1);
+	info->pdata->power(true);
 	msleep(50);
 
 	return ISC_SUCCESS;
@@ -1702,20 +1655,18 @@ static int mms_flash_fw(struct mms_ts_info *info, bool force_update, int cmd)
 			}
 		}
 	} else {
-		if(info->panel == EELY) {
-			dev_err(&client->dev, "requesting tsp_melfas/lt/mms252_el.fw\n");
+		if (info->panel == YONGFAST) {
 			ret = request_firmware(&fw,
-					"tsp_melfas/lt/mms252_el.fw",
-					&client->dev);
-		} else if (info->panel == ILJIN) {
+				"tsp_melfas/lt/melfas_yf.fw",
+				&client->dev);
+		} else if (info->panel == WINTEC) {
 			ret = request_firmware(&fw,
-					"tsp_melfas/lt/melfas_ij.fw",
-					&client->dev);
-			dev_err(&client->dev, "requesting tsp_melfas/lt/melfas_ij.fw\n");
-		}
-		else {
-			ret = -1;
-			dev_err(&client->dev, "[TSP] wrong panel - no firmware requested\n");	
+				"tsp_melfas/lt/melfas_wt.fw",
+				&client->dev);
+		} else {
+			ret = request_firmware(&fw,
+				"tsp_melfas/lt/melfas_ij.fw",
+				&client->dev);
 		}
 		if (ret) {
 			dev_err(&client->dev, "failed to read firmware\n");
@@ -1780,7 +1731,7 @@ static int mms_flash_fw(struct mms_ts_info *info, bool force_update, int cmd)
 		}
 	}
 	ret = 0;
-printk(KERN_INFO "mms_flash_fw end");
+
 out:
 	if (cmd == UMS) {
 		filp_close(fp, current->files);
@@ -1809,16 +1760,15 @@ static void fw_update(void *device_data)
 	int retries = 4;
 	char result[16] = {0};
 
-	if(info->panel == EELY) {
-		fw_bin_ver = FW_VERSION_EL;
-		fw_core_ver = CORE_VERSION_EL;
-	}
-	else if (info->panel == ILJIN) {
+	if (info->panel == YONGFAST) {
+		fw_bin_ver = FW_VERSION_YF;
+		fw_core_ver = CORE_VERSION_YF;
+	} else if (info->panel == WINTEC) {
+		fw_bin_ver = FW_VERSION_WT;
+		fw_core_ver = CORE_VERSION_WT;
+	} else {
 		fw_bin_ver = FW_VERSION_IJ;
 		fw_core_ver = CORE_VERSION_IJ;
-	}
-	else {
-		pr_err("[TSP] fw_update Wrong Panel");
 	}
 
 	set_default_result(info);
@@ -1911,14 +1861,15 @@ static void get_fw_ver_bin(void *device_data)
 	char buff[16] = {0};
 
 	set_default_result(info);
-
-	if (info->panel == ILJIN) {
+	if (info->panel == YONGFAST) {
 		snprintf(buff, sizeof(buff), "ME%02x%02x%02x",
-			info->panel, CORE_VERSION_IJ, FW_VERSION_IJ);	
-	}
-	else { /* EELY*/
+			info->panel, CORE_VERSION_YF, FW_VERSION_YF);
+	} else if (info->panel == WINTEC) {
 		snprintf(buff, sizeof(buff), "ME%02x%02x%02x",
-			info->panel, CORE_VERSION_EL, FW_VERSION_EL);
+			info->panel, CORE_VERSION_WT, FW_VERSION_WT);
+	} else {
+		snprintf(buff, sizeof(buff), "ME%02x%02x%02x",
+			info->panel, CORE_VERSION_IJ, FW_VERSION_IJ);
 	}
 
 	set_cmd_result(info, buff, strnlen(buff, sizeof(buff)));
@@ -1930,15 +1881,14 @@ static void get_fw_ver_bin(void *device_data)
 static void get_fw_ver_ic(void *device_data)
 {
 	struct mms_ts_info *info = (struct mms_ts_info *)device_data;
+	int ret = 0;
 
 	char buff[16] = {0};
 
 	set_default_result(info);
 
-	if (info->enabled){
-		if(get_fw_version(info)<0)
-			pr_err("[TSP] : get_fw_version");
-	}
+	if (info->enabled)
+		ret = get_fw_version(info);
 
 	snprintf(buff, sizeof(buff), "ME%02x%02x%02x",
 		info->panel, info->fw_core_ver, info->fw_ic_ver);
@@ -1957,7 +1907,11 @@ static void get_config_ver(void *device_data)
 
 	set_default_result(info);
 
-	if (info->panel == ILJIN)
+	if (info->panel == YONGFAST)
+		snprintf(buff, sizeof(buff), "T311_Me_0402_YF");
+	else if (info->panel == WINTEC)
+		snprintf(buff, sizeof(buff), "T311_Me_0401_WT");
+	else if (info->panel == ILJIN)
 		snprintf(buff, sizeof(buff), "T311_Me_0608_IJ");
 	else if (info->panel == EELY)
 		snprintf(buff, sizeof(buff), "T311_Me_0608_EL");
@@ -1993,17 +1947,7 @@ static void get_threshold(void *device_data)
 	dev_info(&info->client->dev, "%s: %s(%d)\n", __func__,
 			buff, strnlen(buff, sizeof(buff)));
 }
-static int is_melfas_vdd_on(struct mms_ts_info *info)
-{
-	int ret;
 
-	ret = gpio_get_value(info->pdata->vdd_en);
-	pr_info("[TSP] %s = %d\n", __func__, ret);
-
-	if (ret)
-		return 1;
-	return 0;
-}
 static void module_off_master(void *device_data)
 {
 	struct mms_ts_info *info = (struct mms_ts_info *)device_data;
@@ -2018,9 +1962,9 @@ static void module_off_master(void *device_data)
 	}
 	mutex_unlock(&info->lock);
 
-	info->power(info, 0);
+	info->pdata->power(0);
 
-	if (is_melfas_vdd_on(info) == 0)
+	if (info->pdata->is_vdd_on() == 0)
 		snprintf(buff, sizeof(buff), "%s", "OK");
 	else
 		snprintf(buff, sizeof(buff), "%s", "NG");
@@ -2051,7 +1995,7 @@ static void module_on_master(void *device_data)
 	}
 	mutex_unlock(&info->lock);
 
-	if (is_melfas_vdd_on(info) == 1)
+	if (info->pdata->is_vdd_on() == 1)
 		snprintf(buff, sizeof(buff), "%s", "OK");
 	else
 		snprintf(buff, sizeof(buff), "%s", "NG");
@@ -2212,7 +2156,7 @@ static void get_x_num(void *device_data)
 	struct mms_ts_info *info = (struct mms_ts_info *)device_data;
 
 	char buff[16] = {0};
-	u32 val;
+	int val;
 	u8 r_buf[2];
 	int ret;
 
@@ -2245,7 +2189,7 @@ static void get_y_num(void *device_data)
 	struct mms_ts_info *info = (struct mms_ts_info *)device_data;
 
 	char buff[16] = {0};
-	u32 val;
+	int val;
 	u8 r_buf[2];
 	int ret;
 
@@ -2458,11 +2402,10 @@ static ssize_t touch_led_control(struct device *dev,
 {
 	struct mms_ts_info *info = dev_get_drvdata(dev);
 	struct i2c_client *client = info->client;
-	u32 data;
+	int data;
 	int ret;
 
 	ret = sscanf(buf, "%d", &data);
-	//ret = kstrtol(buf,12, &data);
 	if (ret != 1) {
 		dev_err(&client->dev, "%s: cmd read err\n", __func__);
 		return count;
@@ -2476,11 +2419,11 @@ static ssize_t touch_led_control(struct device *dev,
 
 	if (data == 1) {
 		dev_notice(&client->dev, "led on\n");
-		info->keyled(info, 1);
+		info->pdata->keyled(1);
 		info->led_cmd = true;
 	} else {
 		dev_notice(&client->dev, "led off\n");
-		info->keyled(info, 0);
+		info->pdata->keyled(0);
 		info->led_cmd = false;
 	}
 	return count;
@@ -2593,21 +2536,6 @@ static ssize_t touchkey_back_show(struct device *dev,
 
 	return sprintf(buf, "%d\n", info->back_s);
 }
-
-static ssize_t touchkey_fw_read(struct device *dev,
-				struct device_attribute *attr, char *buf)
-{
-	struct mms_ts_info *info = dev_get_drvdata(dev);
-
-	if(info->panel == ILJIN) {
-		return snprintf(buf, 10, "ME%02x%02x%02x",
-			info->panel, CORE_VERSION_IJ, FW_VERSION_IJ);
-	} else { /* EELY */
-		return snprintf(buf, 10, "ME%02x%02x%02x",
-			info->panel, CORE_VERSION_EL, FW_VERSION_EL);
-	}
-}
-
 #endif
 
 #ifdef ESD_DEBUG
@@ -2672,8 +2600,7 @@ static ssize_t show_intensity_logging_on(struct device *dev,
 	mm_segment_t old_fs;
 	long nwrite;
 	u32 val;
-	int i, c;
-	u32 y;
+	int i, y, c;
 
 	old_fs = get_fs();
 	set_fs(KERNEL_DS);
@@ -2735,18 +2662,13 @@ static ssize_t show_intensity_logging_off(struct device *dev,
 #endif
 
 static DEVICE_ATTR(close_tsp_test, S_IRUGO, show_close_tsp_test, NULL);
-static DEVICE_ATTR(cmd, S_IWUSR | S_IWGRP | S_IWOTH, NULL, store_cmd);
+static DEVICE_ATTR(cmd, S_IWUSR | S_IWGRP, NULL, store_cmd);
 static DEVICE_ATTR(cmd_status, S_IRUGO, show_cmd_status, NULL);
 static DEVICE_ATTR(cmd_result, S_IRUGO, show_cmd_result, NULL);
 #if TOUCHKEY
 static DEVICE_ATTR(touchkey_threshold, S_IRUGO, touchkey_threshold_show, NULL);
 static DEVICE_ATTR(touchkey_menu, S_IRUGO, touchkey_menu_show, NULL);
 static DEVICE_ATTR(touchkey_back, S_IRUGO, touchkey_back_show, NULL);
-static DEVICE_ATTR(touchkey_firm_version_panel, S_IRUGO,
-                                touchkey_fw_read, NULL);
-static DEVICE_ATTR(touchkey_firm_version_phone, S_IRUGO,
-                                touchkey_fw_read, NULL);
-
 #endif
 #ifdef ESD_DEBUG
 static DEVICE_ATTR(intensity_logging_on, S_IRUGO, show_intensity_logging_on,
@@ -2782,8 +2704,6 @@ static struct attribute *sec_touchkey_attributes[] = {
 	&dev_attr_touchkey_threshold.attr,
 	&dev_attr_touchkey_menu.attr,
 	&dev_attr_touchkey_back.attr,
-	&dev_attr_touchkey_firm_version_panel.attr,
-	&dev_attr_touchkey_firm_version_phone.attr,
 #endif
 	NULL,
 };
@@ -2807,18 +2727,84 @@ static int mms_ts_fw_check(struct mms_ts_info *info)
 		pr_err("%s: tsp driver unload\n", __func__);
 		return ret;
 	}
-	if (info->panel == EELY)
-		dev_info(&client->dev,
-			"EELY panel\n");
-	else if (info->panel == ILJIN)
-		dev_info(&client->dev,
-			"IJLIN panel\n");
-	else
-		dev_info(&client->dev,
-			"unknown panel\n");
 
-	if (info->panel == ILJIN)
-	{
+	if (info->panel == YONGFAST) {
+		ret = get_fw_version(info);
+		if (ret != 0) {
+			dev_err(&client->dev,
+				"fw_version read fail\n");
+			update = true;
+		}
+		if (!update) {
+			if (info->fw_boot_ver != BOOT_VERSION_YF) {
+				dev_err(&client->dev,
+					"boot version must be 0x%x\n",
+					BOOT_VERSION_YF);
+				update = true;
+			}
+		}
+		if (!update) {
+			if (info->fw_core_ver != CORE_VERSION_YF) {
+				dev_err(&client->dev,
+					"core version must be 0x%x\n",
+					CORE_VERSION_YF);
+				update = true;
+			}
+		}
+		if (!update) {
+			if (info->fw_ic_ver != FW_VERSION_YF) {
+				dev_err(&client->dev,
+					"config version must be 0x%x\n",
+					FW_VERSION_YF);
+				update = true;
+			}
+		}
+	} else if (info->panel == WINTEC) {
+		ret = get_fw_version(info);
+		if (ret != 0) {
+			dev_err(&client->dev,
+				"fw_version read fail\n");
+			update = true;
+		}
+		if (!update) {
+			if (info->fw_boot_ver != BOOT_VERSION_WT) {
+				dev_err(&client->dev,
+					"boot version must be 0x%x\n",
+					BOOT_VERSION_WT);
+				update = true;
+			}
+		}
+		if (!update) {
+			if (info->fw_core_ver != CORE_VERSION_WT) {
+				dev_err(&client->dev,
+					"core version must be 0x%x\n",
+					CORE_VERSION_WT);
+				update = true;
+			}
+		}
+		if (!update) {
+			if (info->fw_ic_ver != FW_VERSION_WT) {
+				dev_err(&client->dev,
+					"config version must be 0x%x\n",
+					FW_VERSION_WT);
+				update = true;
+			}
+		}
+	} else if (info->panel == NO_PANEL) {
+		dev_info(&client->dev,
+				"no touch panel\n");
+		return -1;
+	} else {
+		if (info->panel == ILJIN)
+			dev_info(&client->dev,
+				"ILJIN panel\n");
+		else if (info->panel == EELY)
+			dev_info(&client->dev,
+				"EELY panel\n");
+		else
+			dev_info(&client->dev,
+				"unknown panel\n");
+
 		ret = get_fw_version(info);
 		if (ret != 0) {
 			dev_err(&client->dev, "fw_version read fail\n");
@@ -2851,40 +2837,6 @@ static int mms_ts_fw_check(struct mms_ts_info *info)
 			}
 		}
 	}
-	else if (info->panel == EELY)
-	{
-		ret = get_fw_version(info);
-		if (ret != 0) {
-			dev_err(&client->dev, "fw_version read fail\n");
-			update = true;
-		}
-		if (!update) {
-			if (info->fw_boot_ver != BOOT_VERSION_EL) {
-				dev_err(&client->dev,
-					"boot version must be 0x%x\n",
-					BOOT_VERSION_EL);
-				update = true;
-			}
-		}
-		if (!update) {
-			if ((info->fw_core_ver < CORE_VERSION_EL) ||
-				(info->fw_core_ver == 0xff)) {
-				dev_err(&client->dev,
-					"core version must be 0x%x\n",
-					CORE_VERSION_EL);
-				update = true;
-			}
-		}
-		if (!update) {
-			if ((info->fw_ic_ver < FW_VERSION_EL) ||
-				(info->fw_ic_ver == 0xff)) {
-				dev_err(&client->dev,
-					"config version must be over 0x%x\n",
-					FW_VERSION_EL);
-				update = true;
-			}
-		}
-	}
 
 	if (update) {
 		dev_err(&client->dev, "excute mms_flash_fw\n");
@@ -2909,545 +2861,14 @@ static int mms_ts_fw_check(struct mms_ts_info *info)
 
 	return 0;
 }
-static void melfas_request_gpio(struct melfas_tsi_platform_data *pdata)
-{
-	int ret;
-	pr_info("[TSP] %s called \n", __func__);
-
-	ret = gpio_request(pdata->gpio_int, "melfas_tsp_irq");
-	if (ret) {
-		pr_err("[TSP]%s: unable to request melfas_tsp_irq [%d]\n",
-				__func__, pdata->gpio_int);
-		return;
-	}
-	ret = gpio_request(pdata->vdd_en, "melfas_vdd_en");
-	if (ret) {
-		pr_err("[TSP]%s: unable to request melfas_vdd_en [%d]\n",
-				__func__, pdata->vdd_en);
-		return;
-	}
-	ret = gpio_request(pdata->vdd_en2, "melfas_vdd_en2");
-	if (ret) {
-		pr_err("[TSP]%s: unable to request melfas_vdd_en2 [%d]\n",
-				__func__, pdata->vdd_en2);
-		return;
-	}
-	ret = gpio_request(pdata->tsp_vendor1, "melfas_tsp_vendor1");
-	if (ret) {
-		pr_err("[TSP]%s: unable to request melfas_vdd_en2 [%d]\n",
-				__func__, pdata->tsp_vendor1);
-		return;
-	}
-	ret = gpio_request(pdata->tsp_vendor2, "melfas_tsp_vendor2");
-	if (ret) {
-		pr_err("[TSP]%s: unable to request melfas_vdd_en2 [%d]\n",
-				__func__, pdata->tsp_vendor2);
-		return;
-	}
-	ret = gpio_request(pdata->tkey_led_en, "tkey_enable");
-	if (ret) {
-		pr_err("[TSP]%s: unable to request tkey_enable [%d]\n",
-				__func__, pdata->tkey_led_en);
-		return;
-	}
-}
-
-#ifdef CONFIG_OF
-
-static int mms_get_dt_coords(struct device *dev, char *name,
-				struct melfas_tsi_platform_data *pdata)
-{
-	u32 coords[MMS_COORDS_ARR_SIZE];
-	struct property *prop;
-	struct device_node *np = dev->of_node;
-	int coords_size, rc;
-
-	prop = of_find_property(np, name, NULL);
-	if (!prop)
-		return -EINVAL;
-	if (!prop->value)
-		return -ENODATA;
-
-	coords_size = prop->length / sizeof(u32);
-	if (coords_size != MMS_COORDS_ARR_SIZE) {
-		dev_err(dev, "invalid %s\n", name);
-		return -EINVAL;
-	}
-
-	rc = of_property_read_u32_array(np, name, coords, coords_size);
-	if (rc && (rc != -EINVAL)) {
-		dev_err(dev, "Unable to read %s\n", name);
-		return rc;
-	}
-
-	if (strncmp(name, "melfas,panel-coords",
-			sizeof("melfas,panel-coords")) == 0) {
-		pdata->invert_x = coords[0];
-		pdata->invert_y = coords[1];
-		pdata->max_x = coords[2];
-		pdata->max_y = coords[3];
-	} else {
-		dev_err(dev, "unsupported property %s\n", name);
-		return -EINVAL;
-	}
-
-	return 0;
-}
-
-static int  get_panel_version(struct mms_ts_info *info){
-
-	struct regulator *regulator_pullup;
-	int rc = 0;
-
-	regulator_pullup = regulator_get(NULL, "8226_l6");
-	if (IS_ERR(regulator_pullup))
-		return PTR_ERR(regulator_pullup);
-	regulator_set_voltage(regulator_pullup, 1800000, 1800000);
-	regulator_enable(regulator_pullup);
-	gpio_tlmm_config(GPIO_CFG(info->pdata->tsp_vendor1,0,GPIO_CFG_OUTPUT,GPIO_CFG_PULL_UP, GPIO_CFG_2MA), GPIO_CFG_ENABLE);
-	gpio_tlmm_config(GPIO_CFG(info->pdata->tsp_vendor2,0,GPIO_CFG_OUTPUT,GPIO_CFG_PULL_UP, GPIO_CFG_2MA), GPIO_CFG_ENABLE);
-	if (gpio_get_value(info->pdata->tsp_vendor1))
-		info->pdata->panel = 1;
-	else
-		info->pdata->panel = 0;
-
-	if (gpio_get_value(info->pdata->tsp_vendor2))
-		info->pdata->panel = info->pdata->panel | (1 << 1);
-
-	regulator_disable(regulator_pullup);
-	return rc;
-}
-
-int melfas_power(struct mms_ts_info *info, int on){
-
-	if (tsp_power_enabled == on)
-		return 0;
-	printk(KERN_DEBUG "[TSP] %s %s\n",
-				__func__, on ? "on" : "off");
-	gpio_tlmm_config(GPIO_CFG(info->pdata->vdd_en,0,GPIO_CFG_OUTPUT,GPIO_CFG_NO_PULL, GPIO_CFG_2MA), GPIO_CFG_ENABLE);
-	gpio_tlmm_config(GPIO_CFG(info->pdata->vdd_en2,0,GPIO_CFG_OUTPUT,GPIO_CFG_NO_PULL, GPIO_CFG_2MA), GPIO_CFG_ENABLE);
-	gpio_set_value(info->pdata->vdd_en,on);
-	msleep(20);
-	gpio_set_value(info->pdata->vdd_en2,on);
-	tsp_power_enabled = on;
-	return 0;
-}
-
-#if TOUCHKEY
-int key_led_control(struct mms_ts_info *info, int on)
-{
-
-	printk(KERN_DEBUG "[TSP] %s %s\n",
-		__func__, on ? "on" : "off");
-	gpio_set_value(info->pdata->tkey_led_en,on);
-	return 0;
-}
-
-#endif
-static int mms_parse_dt(struct device *dev,
-			struct melfas_tsi_platform_data *pdata)
-{
-	int rc;
-	struct device_node *np = dev->of_node;
-
-	rc = mms_get_dt_coords(dev, "melfas,panel-coords", pdata);
-	if (rc)
-		return rc;
-
-	/* regulator info */
-	pdata->i2c_pull_up = of_property_read_bool(np, "melfas,i2c-pull-up");
-	pdata->vdd_en = of_get_named_gpio(np, "vdd_en-gpio", 0);
-	pdata->vdd_en2 = of_get_named_gpio(np, "vdd_en2-gpio", 0);
-	pdata->tkey_led_en = of_get_named_gpio(np, "tkey_en-gpio", 0);
-	pdata->tsp_vendor1 = of_get_named_gpio(np, "tsp_vendor1-gpio", 0);
-	pdata->tsp_vendor2 = of_get_named_gpio(np, "tsp_vendor2-gpio", 0);
-	/* reset, irq gpio info */
-	//pdata->gpio_scl = of_get_named_gpio_flags(np, "melfas,scl-gpio",
-	//			0, &pdata->scl_gpio_flags);
-	//pdata->gpio_sda = of_get_named_gpio_flags(np, "melfas,sda-gpio",
-	//			0, &pdata->sda_gpio_flags);
-	pdata->gpio_int = of_get_named_gpio_flags(np, "melfas,irq-gpio",
-				0, &pdata->irq_gpio_flags);
-	pdata->config_fw_version = of_get_property(np,
-				"melfas,config_fw_version", NULL);
-
-	return 0;
-}
-#else
-static int mms_parse_dt(struct device *dev,
-			struct melfas_tsi_platform_data *pdata)
-{
-	return -ENODEV;
-}
-#endif
-
-#if 0
-static ssize_t melfas_enabled_store(struct device *dev,
-		struct device_attribute *attr, const char *buf, size_t count)
-{
-	long input;
-	int ret = 0;
-
-	ret = kstrtol(buf, 10, &input);
-	if(ret || ret < 0){
-            printk(KERN_INFO "Error value melfas_enabled_store \n");
-            return ret;
-        }
-	pr_info("TSP enabled: %d\n",(int)input);
-
-	if(input == 1)
-		mms_ts_resume(dev);
-	else if(input == 0)
-		mms_ts_suspend(dev);
-	else
-		return -EINVAL;
-
-	return count;
-}
-
-static struct device_attribute attrs[] = {
-	__ATTR(enabled, (S_IRUGO | S_IWUSR | S_IWGRP),
-			NULL,
-			melfas_enabled_store),
-};
-#endif
-
-/* START - Added to support API's for TSP tuning */
-static int mms_fs_open(struct inode *node, struct file *fp)
-{
-	struct mms_ts_info *info;
-	struct i2c_client *client;
-	struct i2c_msg msg;
-	u8 buf[3] = {
-		ADDR_UNIV_CMD,//MMS_UNIVERSAL_CMD,
-		MMS_CMD_SET_LOG_MODE,
-		true,
-	};
-
-	info = container_of(node->i_cdev, struct mms_ts_info, cdev);
-	client = info->client;
-
-	disable_irq(info->irq);
-	fp->private_data = info;
-
-	msg.addr = client->addr;
-	msg.flags = 0;
-	msg.buf = buf;
-	msg.len = sizeof(buf);
-
-	i2c_transfer(client->adapter, &msg, 1);
-
-	info->log.data = kzalloc(MAX_LOG_LENGTH * 20 + 5, GFP_KERNEL);
-
-	//mms_clear_input_data(info);
-	touch_is_pressed = 0;
-	release_all_fingers(info);
-
-	return 0;
-}
-
-static int mms_fs_release(struct inode *node, struct file *fp)
-{
-	struct mms_ts_info *info = fp->private_data;
-
-//	mms_clear_input_data(info);
-	touch_is_pressed = 0;
-	release_all_fingers(info);
-
-	//mms_reboot(info);
-	mms_reset(info);
-
-	kfree(info->log.data);
-	enable_irq(info->irq);
-
-	return 0;
-}
-
-static int esd_cnt;
-static void mms_report_input_data(struct mms_ts_info *info, u8 sz, u8 *buf)
-{
-	int i;
-	struct i2c_client *client = info->client;
-	int id;
-	int x;
-	int y;
-	int touch_major;
-	int pressure;
-	int key_code;
-	int key_state;
-	u8 *tmp;
-
-	if (buf[0] == MMS_NOTIFY_EVENT) {
-		dev_info(&client->dev, "TSP mode changed (%d)\n", buf[1]);
-		goto out;
-	} else if (buf[0] == MMS_ERROR_EVENT) {
-		dev_info(&client->dev, "Error detected, restarting TSP\n");
-		//mms_clear_input_data(info);
-		touch_is_pressed = 0;
-		release_all_fingers(info);
-
-		//mms_reboot(info);
-		mms_reset(info);
-		esd_cnt++;
-		if (esd_cnt>= ESD_DETECT_COUNT)
-		{
-			i2c_smbus_write_byte_data(info->client, MMS_MODE_CONTROL, 0x04);
-			esd_cnt = 0;
-		}
-		goto out;
-	}
-
-	for (i = 0; i < sz; i += FINGER_EVENT_SZ) {
-		tmp = buf + i;
-		esd_cnt = 0;
-		if (tmp[0] & MMS_TOUCH_KEY_EVENT) {
-			switch (tmp[0] & 0xf) {
-			case 1:
-				key_code = KEY_MENU;
-				break;
-			case 2:
-				key_code = KEY_BACK;
-				break;
-			default:
-				dev_err(&client->dev, "unknown key type\n");
-				goto out;
-				break;
-			}
-
-			key_state = (tmp[0] & 0x80) ? 1 : 0;
-			input_report_key(info->input_dev, key_code, key_state);
-
-		} else {
-			id = (tmp[0] & 0xf) -1;
-			x = tmp[2] | ((tmp[1] & 0xf) << 8);
-			y = tmp[3] | (((tmp[1] >> 4 ) & 0xf) << 8);
-			touch_major = tmp[4];
-			pressure = tmp[5];
-
-			input_mt_slot(info->input_dev, id);
-
-			if (!(tmp[0] & 0x80)) {
-				input_mt_report_slot_state(info->input_dev, MT_TOOL_FINGER, false);
-				continue;
-			}
-
-			input_mt_report_slot_state(info->input_dev, MT_TOOL_FINGER, true);
-			input_report_abs(info->input_dev, ABS_MT_POSITION_X, x);
-			input_report_abs(info->input_dev, ABS_MT_POSITION_Y, y);
-			input_report_abs(info->input_dev, ABS_MT_TOUCH_MAJOR, touch_major);
-			input_report_abs(info->input_dev, ABS_MT_PRESSURE, pressure);
-		}
-	}
-
-	input_sync(info->input_dev);
-
-out:
-	return;
-
-}
-
-static void mms_event_handler(struct mms_ts_info *info)
-{
-	struct i2c_client *client = info->client;
-	int sz;
-	int ret;
-	int row_num;
-	u8 reg = MMS_INPUT_EVENT;
-	struct i2c_msg msg[] = {
-		{
-			.addr = client->addr,
-			.flags = 0,
-			.buf = &reg,
-			.len = 1,
-		}, {
-			.addr = client->addr,
-			.flags = I2C_M_RD,
-			.buf = info->log.data,
-		},
-
-	};
-	struct mms_log_pkt {
-		u8	marker;
-		u8	log_info;
-		u8	code;
-		u8	element_sz;
-		u8	row_sz;
-	} __attribute__ ((packed)) *pkt = (struct mms_log_pkt *)info->log.data;
-
-	memset(pkt, 0, sizeof(*pkt));
-
-	//if (gpio_get_value(info->pdata->gpio_resetb))
-	//	return;
-
-	sz = i2c_smbus_read_byte_data(client, MMS_EVENT_PKT_SZ);
-	msg[1].len = sz;
-
-	ret = i2c_transfer(client->adapter, msg, ARRAY_SIZE(msg));
-	if (ret != ARRAY_SIZE(msg)) {
-		dev_err(&client->dev,
-			"failed to read %d bytes of data\n",
-			sz);
-		return;
-	}
-
-	if ((pkt->marker & 0xf) == MMS_LOG_EVENT) {
-		if ((pkt->log_info & 0x7) == 0x1) {
-			pkt->element_sz = 0;
-			pkt->row_sz = 0;
-
-			return;
-		}
-
-		switch (pkt->log_info >> 4) {
-		case LOG_TYPE_U08:
-		case LOG_TYPE_S08:
-			msg[1].len = pkt->element_sz;
-			break;
-		case LOG_TYPE_U16:
-		case LOG_TYPE_S16:
-			msg[1].len = pkt->element_sz * 2;
-			break;
-		case LOG_TYPE_U32:
-		case LOG_TYPE_S32:
-			msg[1].len = pkt->element_sz * 4;
-			break;
-		default:
-			dev_err(&client->dev, "invalied log type\n");
-			return;
-		}
-
-		msg[1].buf = info->log.data + sizeof(struct mms_log_pkt);
-		reg = CMD_RESULT;//MMS_UNIVERSAL_RESULT;
-		row_num = pkt->row_sz ? pkt->row_sz : 1;
-
-		while (row_num--) {
-			//while (gpio_get_value(info->pdata->gpio_resetb))
-			//	;
-			ret = i2c_transfer(client->adapter, msg, ARRAY_SIZE(msg));
-			msg[1].buf += msg[1].len;
-		};
-	} else {
-		mms_report_input_data(info, sz, info->log.data);
-		memset(pkt, 0, sizeof(*pkt));
-	}
-
-	return;
-}
-
-static ssize_t mms_fs_read(struct file *fp, char *rbuf, size_t cnt, loff_t *fpos)
-{
-	struct mms_ts_info *info = fp->private_data;
-	struct i2c_client *client = info->client;
-	int ret = 0;
-	char rx_num, tx_num;
-
-	switch (info->log.cmd) {
-	case GET_RX_NUM:
-		rx_num = RX_NUM;
-		ret = copy_to_user(rbuf, &rx_num, 1);
-		break;
-	case GET_TX_NUM:
-		tx_num = TX_NUM;
-		ret = copy_to_user(rbuf, &tx_num, 1);
-		break;
-	case GET_EVENT_DATA:
-		mms_event_handler(info);
-		/* copy data without log marker */
-		ret = copy_to_user(rbuf, info->log.data + 1, cnt);
-		break;
-	default:
-		dev_err(&client->dev, "unknown command\n");
-		ret = -EFAULT;
-		break;
-	}
-
-	return ret;
-
-}
-
-static ssize_t mms_fs_write(struct file *fp, const char *wbuf, size_t cnt, loff_t *fpos)
-{
-	struct mms_ts_info *info = fp->private_data;
-	struct i2c_client *client = info->client;
-	u8 *buf;
-	struct i2c_msg msg = {
-		.addr = client->addr,
-		.flags = 0,
-		.len = cnt,
-	};
-	int ret = 0;
-
-	mutex_lock(&info->lock);
-
-	if (!info->enabled)
-		goto tsp_disabled;
-
-	msg.buf = buf = kzalloc(cnt + 1, GFP_KERNEL);
-
-	if ((buf == NULL) || copy_from_user(buf, wbuf, cnt)) {
-		dev_err(&client->dev, "failed to read data from user\n");
-		ret = -EIO;
-		goto out;
-	}
-
-	if (cnt == 1) {
-		info->log.cmd = *buf;
-	} else {
-		if (i2c_transfer(client->adapter, &msg, 1) != 1) {
-			dev_err(&client->dev, "failed to transfer data\n");
-			ret = -EIO;
-			goto out;
-		}
-	}
-
-	ret = 0;
-
-out:
-	kfree(buf);
-tsp_disabled:
-	mutex_unlock(&info->lock);
-
-	return ret;
-}
-
-static struct file_operations mms_fops = {
-	.owner		= THIS_MODULE,
-	.open		= mms_fs_open,
-	.release	= mms_fs_release,
-	.read		= mms_fs_read,
-	.write		= mms_fs_write,
-};
-/* END - Added to support API's for TSP tuning */
-
-#ifdef USE_OPEN_CLOSE
-static int mms_ts_input_open(struct input_dev *dev)
-{
-	struct mms_ts_info *info;
-
-	pr_info("[TSP] %s\n", __func__);
-	info = input_get_drvdata(dev);
-	return mms_ts_resume(&info->client->dev);
-}
-static void mms_ts_input_close(struct input_dev *dev)
-{
-	struct mms_ts_info *info;
-
-	pr_info("[TSP] %s\n", __func__);
-	info = input_get_drvdata(dev);
-	mms_ts_suspend(&info->client->dev);
-}
-#endif
 
 static int __devinit mms_ts_probe(struct i2c_client *client,
 				  const struct i2c_device_id *id)
 {
 	struct i2c_adapter *adapter = to_i2c_adapter(client->dev.parent);
-	struct melfas_tsi_platform_data *pdata;
 	struct mms_ts_info *info;
 	struct input_dev *input_dev;
 	int ret = 0;
-	int error;
-
 #ifdef SEC_TSP_FACTORY_TEST
 	int i;
 	struct device *fac_dev_ts;
@@ -3459,23 +2880,6 @@ static int __devinit mms_ts_probe(struct i2c_client *client,
 
 	if (!i2c_check_functionality(adapter, I2C_FUNC_I2C))
 		return -EIO;
-	if (client->dev.of_node) {
-		pdata = devm_kzalloc(&client->dev,
-			sizeof(struct melfas_tsi_platform_data), GFP_KERNEL);
-		if (!pdata) {
-			dev_err(&client->dev, "Failed to allocate memory\n");
-			return -ENOMEM;
-		}
-
-		error = mms_parse_dt(&client->dev, pdata);
-		if (error)
-			return error;
-	} else
-		pdata = client->dev.platform_data;
-
-	if (!pdata)
-		return -EINVAL;
-	melfas_request_gpio(pdata);
 
 	info = kzalloc(sizeof(struct mms_ts_info), GFP_KERNEL);
 	if (!info) {
@@ -3490,13 +2894,10 @@ static int __devinit mms_ts_probe(struct i2c_client *client,
 		ret = -ENOMEM;
 		goto err_input_alloc;
 	}
+
 	info->client = client;
 	info->input_dev = input_dev;
-	info->pdata = pdata;
-	info->keyled = key_led_control;
-	ret = get_panel_version(info);
-	if(ret < 0)
-		printk(KERN_INFO "get_panel_version error" );
+	info->pdata = client->dev.platform_data;
 	if (NULL == info->pdata) {
 		pr_err("failed to get platform data\n");
 		goto err_config;
@@ -3511,7 +2912,6 @@ static int __devinit mms_ts_probe(struct i2c_client *client,
 	info->input_event = info->pdata->input_event;
 	info->register_cb = info->pdata->register_cb;
 	info->threewave_mode = false;
-	info->power = melfas_power;
 #if TOUCHKEY
 	info->keycode[0] = 0;
 	info->keycode[1] = KEY_MENU;
@@ -3519,39 +2919,26 @@ static int __devinit mms_ts_probe(struct i2c_client *client,
 
 	for (i = 0; i < 3; i++)
 		info->touchkey[i] = 0;
-
 	info->led_cmd = false;
-	info->keyled(info, 0);
+
 	info->menu_s = 0;
 	info->back_s = 0;
 #endif
 	i2c_set_clientdata(client, info);
-	if (info->power == NULL) {
+
+	if (info->pdata->power == NULL) {
 		dev_err(&client->dev,
 			"missing power control\n");
 		goto err_config;
 	} else {
-		info->power(info, 1);
+		info->pdata->power(true);
 		msleep(100);
 	}
 
-#if 0
 	info->panel = info->pdata->panel;
-#else
-	#if defined(CONFIG_MACH_MILLET3G_EUR)
-		if (system_rev < 2)
-			info->panel = ILJIN;
-		else
-			info->panel = EELY;
-	#else
-		info->panel = EELY;
-	#endif
-#endif
-	printk(KERN_INFO "%s: [TSP] panel = %d!!\n", __func__, info->panel);
-	printk("%s: [TSP] system_rev = %d\n", __func__, system_rev);
 	dev_info(&client->dev, "%d panel\n", info->panel);
 
-	//mms_reset(info); //need to check
+	mms_reset(info);
 
 	ret = mms_ts_fw_check(info);
 	if (ret) {
@@ -3595,10 +2982,6 @@ static int __devinit mms_ts_probe(struct i2c_client *client,
 				MIN_ANGLE, MAX_ANGLE, 0, 0);
 	input_set_abs_params(input_dev, ABS_MT_PALM,
 				0, 1, 0, 0);
-#ifdef USE_OPEN_CLOSE
-	input_dev->open = mms_ts_input_open;
-	input_dev->close = mms_ts_input_close;
-#endif
 	input_set_drvdata(input_dev, info);
 
 	ret = input_register_device(input_dev);
@@ -3619,7 +3002,6 @@ static int __devinit mms_ts_probe(struct i2c_client *client,
 
 	info->enabled = true;
 
-	client->irq = gpio_to_irq(pdata->gpio_int);
 	ret = request_threaded_irq(client->irq, NULL, mms_ts_interrupt,
 				   IRQF_TRIGGER_LOW  | IRQF_ONESHOT,
 				   MELFAS_TS_NAME, info);
@@ -3636,24 +3018,6 @@ static int __devinit mms_ts_probe(struct i2c_client *client,
 	register_early_suspend(&info->early_suspend);
 #endif
 
-/* START - Added to support API's for TSP tuning */
-	if (alloc_chrdev_region(&info->mms_dev, 0, 1, "mms_ts")) {
-		dev_err(&client->dev, "failed to allocate device region\n");
-		return -ENOMEM;
-	}
-
-	cdev_init(&info->cdev, &mms_fops);
-	info->cdev.owner = THIS_MODULE;
-
-	if (cdev_add(&info->cdev, info->mms_dev, 1)) {
-		dev_err(&client->dev, "failed to add ch dev\n");
-		return -EIO;
-	}
-
-	info->class = class_create(THIS_MODULE, "mms_ts");
-	device_create(info->class, NULL, info->mms_dev, NULL, "mms_ts");
-/* END - Added to support API's for TSP tuning */
-
 	sec_touchscreen = device_create(sec_class,
 					NULL, 0, info, "sec_touchscreen");
 	if (IS_ERR(sec_touchscreen)) {
@@ -3661,15 +3025,7 @@ static int __devinit mms_ts_probe(struct i2c_client *client,
 			"Failed to create device for the sysfs1\n");
 		ret = -ENODEV;
 	}
-	#if 0
-	ret = sysfs_create_file(&info->input_dev->dev.kobj,
-			&attrs[0].attr);
-	if (ret < 0) {
-		dev_err(&client->dev,
-				"%s: Failed to create sysfs attributes\n",
-				__func__);
-	}
-	#endif
+
 #if TOUCHKEY
 	touchkey_dev = device_create(sec_class,
 		NULL, 0, info, "sec_touchkey");
@@ -3708,9 +3064,9 @@ static int __devinit mms_ts_probe(struct i2c_client *client,
 err_req_irq:
 	input_unregister_device(input_dev);
 err_reg_input_dev:
-	info->power(info,0);
+	info->pdata->power(0);
 #if TOUCHKEY
-	info->keyled(info, 0);
+	info->pdata->keyled(0);
 #endif
 err_config:
 	input_free_device(input_dev);
@@ -3727,10 +3083,10 @@ static int __devexit mms_ts_remove(struct i2c_client *client)
 	struct mms_ts_info *info = i2c_get_clientdata(client);
 
 	if (info->enabled)
-		info->power(info,0);
+		info->pdata->power(0);
 #if TOUCHKEY
 	if (info->led_cmd)
-		info->keyled(info, 0);
+		info->pdata->keyled(0);
 #endif
 	unregister_early_suspend(&info->early_suspend);
 	if (info->irq >= 0)
@@ -3746,10 +3102,10 @@ static void mms_ts_shutdown(struct i2c_client *client)
 	struct mms_ts_info *info = i2c_get_clientdata(client);
 
 	if (info->enabled)
-		info->power(info,0);
+		info->pdata->power(0);
 #if TOUCHKEY
 	if (info->led_cmd)
-		info->keyled(info, 0);
+		info->pdata->keyled(0);
 #endif
 }
 
@@ -3769,11 +3125,11 @@ static int mms_ts_suspend(struct device *dev)
 	info->enabled = false;
 	touch_is_pressed = 0;
 	release_all_fingers(info);
-	info->power(info,0);
+	info->pdata->power(0);
 	info->sleep_wakeup_ta_check = info->ta_status;
 #if TOUCHKEY
 	if (info->led_cmd == true) {
-		info->keyled(info, 0);
+		info->pdata->keyled(0);
 		info->led_cmd = false;
 	}
 #endif
@@ -3793,7 +3149,7 @@ static int mms_ts_resume(struct device *dev)
 
 	dev_notice(&info->client->dev, "%s: users=%d\n", __func__,
 		   info->input_dev->users);
-	info->power(info, 1);
+	info->pdata->power(1);
 	msleep(120);
 
 	if (info->threewave_mode)
@@ -3854,22 +3210,12 @@ static const struct i2c_device_id mms_ts_id[] = {
 
 MODULE_DEVICE_TABLE(i2c, mms_ts_id);
 
-#ifdef CONFIG_OF
-static struct of_device_id mms_match_table[] = {
-	{ .compatible = "melfas,mms252-ts",},
-	{ },
-};
-#else
-#define mms_match_table NULL
-#endif
 static struct i2c_driver mms_ts_driver = {
 	.probe = mms_ts_probe,
 	.remove = __devexit_p(mms_ts_remove),
 	.shutdown = mms_ts_shutdown,
 	.driver = {
 		   .name = MELFAS_TS_NAME,
-		   .owner = THIS_MODULE,
-		   .of_match_table = mms_match_table,
 #if defined(CONFIG_PM) && !defined(CONFIG_HAS_EARLYSUSPEND)
 		   .pm = &mms_ts_pm_ops,
 #endif
@@ -3877,15 +3223,11 @@ static struct i2c_driver mms_ts_driver = {
 	.id_table = mms_ts_id,
 };
 
-static int __devinit mms_ts_init(void)
+static int __init mms_ts_init(void)
 {
-	if (poweroff_charging) {
-		printk("%s : LPM Charging Mode!!\n", __func__);
-		return 0;
-	}
-	else	{
-		return i2c_add_driver(&mms_ts_driver);
-	}
+
+	return i2c_add_driver(&mms_ts_driver);
+
 }
 
 static void __exit mms_ts_exit(void)

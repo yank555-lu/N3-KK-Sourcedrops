@@ -33,6 +33,8 @@
 #include <bcmutils.h>
 #include <dhd.h>
 #include <dhd_dbg.h>
+#include <dhd_linux.h>
+#include <bcmdevs.h>
 
 #include <linux/fcntl.h>
 #include <linux/fs.h>
@@ -49,19 +51,8 @@ struct cntry_locales_custom {
 
 /* Locale table for sec */
 const struct cntry_locales_custom translate_custom_table[] = {
-#if defined(BCM4334_CHIP) || defined(BCM43241_CHIP) || defined(BCM4335_CHIP) || \
-	defined(BCM4339_CHIP)
-	{"",   "XZ", 11},	/* Universal if Country code is unknown or empty */
-	{"IR", "XZ", 11},	/* Universal if Country code is IRAN, (ISLAMIC REPUBLIC OF) */
-	{"SD", "XZ", 11},	/* Universal if Country code is SUDAN */
-	{"SY", "XZ", 11},	/* Universal if Country code is SYRIAN ARAB REPUBLIC */
-	{"GL", "XZ", 11},	/* Universal if Country code is GREENLAND */
-	{"PS", "XZ", 11},	/* Universal if Country code is PALESTINIAN TERRITORY, OCCUPIED */
-	{"TL", "XZ", 11},	/* Universal if Country code is TIMOR-LESTE (EAST TIMOR) */
-	{"MH", "XZ", 11},	/* Universal if Country code is MARSHALL ISLANDS */
-#endif
 #if defined(BCM4330_CHIP) || defined(BCM4334_CHIP) || defined(BCM43241_CHIP)
-	{"AE", "AE", 1},
+	/* 4330/4334/43241 */
 	{"AR", "AR", 1},
 	{"AT", "AT", 1},
 	{"AU", "AU", 2},
@@ -93,34 +84,30 @@ const struct cntry_locales_custom translate_custom_table[] = {
 	{"LU", "LU", 1},
 	{"LV", "LV", 1},
 	{"MT", "MT", 1},
-	{"MX", "MX", 1},
 	{"NL", "NL", 1},
 	{"NO", "NO", 1},
 	{"PL", "PL", 1},
 	{"PT", "PT", 1},
 	{"PY", "PY", 1},
 	{"RO", "RO", 1},
+	{"RU", "RU", 13},
 	{"SE", "SE", 1},
 	{"SI", "SI", 1},
 	{"SK", "SK", 1},
 	{"TW", "TW", 2},
-#endif /* defined(BCM4330_CHIP) || defined(BCM4334_CHIP) || defined(BCM43241_CHIP) */
-#if defined(BCM4334_CHIP) || defined(BCM43241_CHIP)
-	{"RU", "RU", 13},
-	{"SG", "SG", 4},
-	{"US", "US", 46},
-	{"UA", "UA", 8},
-	{"CO", "CO", 4},
-	{"ID", "ID", 1},
-	{"LA", "LA", 1},
-	{"LB", "LB", 2},
-	{"VN", "VN", 4},
-	{"MA", "MA", 1},
-	{"TR", "TR", 7},
-#endif /* defined(BCM4334_CHIP) || defined(BCM43241_CHIP) */
 #ifdef BCM4330_CHIP
 	{"",   "XZ", 1},	/* Universal if Country code is unknown or empty */
-	{"RU", "RU", 13},
+	{"IR", "XZ", 1},	/* Universal if Country code is IRAN, (ISLAMIC REPUBLIC OF) */
+	{"SD", "XZ", 1},	/* Universal if Country code is SUDAN */
+	{"SY", "XZ", 1},	/* Universal if Country code is SYRIAN ARAB REPUBLIC */
+	{"GL", "XZ", 1},	/* Universal if Country code is GREENLAND */
+	{"PS", "XZ", 1},	/* Universal if Country code is PALESTINIAN TERRITORY, OCCUPIED */
+	{"TL", "XZ", 1},	/* Universal if Country code is TIMOR-LESTE (EAST TIMOR) */
+	{"MH", "XZ", 1},	/* Universal if Country code is MARSHALL ISLANDS */
+	{"JO", "XZ", 1},	/* Universal if Country code is Jordan */
+	{"PG", "XZ", 1},	/* Universal if Country code is Papua New Guinea */
+	{"SA", "XZ", 1},	/* Universal if Country code is Saudi Arabia */
+	{"AF", "XZ", 1},	/* Universal if Country code is Afghanistan */
 	{"US", "US", 5},
 	{"UA", "UY", 0},
 	{"AD", "AL", 0},
@@ -135,7 +122,7 @@ const struct cntry_locales_custom translate_custom_table[] = {
 	{"AN", "AG", 0},
 	{"AI", "AS", 0},
 	{"BM", "AS", 0},
-	{"DZ", "IL", 0},
+	{"DZ", "GB", 1},
 	{"LC", "AG", 0},
 	{"MF", "BY", 0},
 	{"GY", "CU", 0},
@@ -148,11 +135,50 @@ const struct cntry_locales_custom translate_custom_table[] = {
 	{"TR", "GB", 1},
 	{"TZ", "BF", 0},
 	{"VN", "BR", 0},
-	{"JO", "XZ", 1},
-	{"PG", "XZ", 1},
-	{"SA", "XZ", 1},
-#endif /* BCM4330_CHIP */
-#if defined(BCM4335_CHIP) || defined(BCM4339_CHIP)
+	{"AE", "AZ", 0},
+	{"IQ", "GB", 1},
+	{"CN", "CL", 0},
+	{"MX", "MX", 1},
+#else
+	/* 4334/43241 */
+	{"",   "XZ", 11},	/* Universal if Country code is unknown or empty */
+	{"IR", "XZ", 11},	/* Universal if Country code is IRAN, (ISLAMIC REPUBLIC OF) */
+	{"SD", "XZ", 11},	/* Universal if Country code is SUDAN */
+	{"SY", "XZ", 11},	/* Universal if Country code is SYRIAN ARAB REPUBLIC */
+	{"GL", "XZ", 11},	/* Universal if Country code is GREENLAND */
+	{"PS", "XZ", 11},	/* Universal if Country code is PALESTINIAN TERRITORY, OCCUPIED */
+	{"TL", "XZ", 11},	/* Universal if Country code is TIMOR-LESTE (EAST TIMOR) */
+	{"MH", "XZ", 11},	/* Universal if Country code is MARSHALL ISLANDS */
+	{"US", "US", 46},
+	{"UA", "UA", 8},
+	{"CO", "CO", 4},
+	{"ID", "ID", 1},
+	{"LA", "LA", 1},
+	{"LB", "LB", 2},
+	{"VN", "VN", 4},
+	{"MA", "MA", 1},
+	{"TR", "TR", 7},
+#endif /* defined(BCM4330_CHIP) */
+#ifdef BCM4334_CHIP
+	{"AE", "AE", 1},
+	{"MX", "MX", 1},
+#endif /* defined(BCM4334_CHIP) */
+#ifdef BCM43241_CHIP
+	{"AE", "AE", 6},
+	{"BD", "BD", 2},
+	{"CN", "CN", 38},
+	{"MX", "MX", 20},
+#endif /* defined(BCM43241_CHIP) */
+#else  /* defined(BCM4330_CHIP) || defined(BCM4334_CHIP) || defined(BCM43241_CHIP) */
+	/* default ccode/regrev */
+	{"",   "XZ", 11},	/* Universal if Country code is unknown or empty */
+	{"IR", "XZ", 11},	/* Universal if Country code is IRAN, (ISLAMIC REPUBLIC OF) */
+	{"SD", "XZ", 11},	/* Universal if Country code is SUDAN */
+	{"SY", "XZ", 11},	/* Universal if Country code is SYRIAN ARAB REPUBLIC */
+	{"GL", "XZ", 11},	/* Universal if Country code is GREENLAND */
+	{"PS", "XZ", 11},	/* Universal if Country code is PALESTINIAN TERRITORY, OCCUPIED */
+	{"TL", "XZ", 11},	/* Universal if Country code is TIMOR-LESTE (EAST TIMOR) */
+	{"MH", "XZ", 11},	/* Universal if Country code is MARSHALL ISLANDS */
 	{"AL", "AL", 2},
 	{"DZ", "DZ", 1},
 	{"AS", "AS", 12},
@@ -245,7 +271,6 @@ const struct cntry_locales_custom translate_custom_table[] = {
 	{"RO", "RO", 4},
 	{"SN", "SN", 2},
 	{"RS", "RS", 2},
-	{"SG", "SG", 4},
 	{"SK", "SK", 4},
 	{"SI", "SI", 4},
 	{"ES", "ES", 4},
@@ -274,14 +299,14 @@ const struct cntry_locales_custom translate_custom_table[] = {
 	{"FR", "FR", 5},
 	{"MN", "MN", 1},
 	{"NI", "NI", 2},
-#endif /* BCM4335_CHIP || BCM4339_CHIP */
+#endif /* default ccode/regrev */
 };
 
 /* Customized Locale convertor
 *  input : ISO 3166-1 country abbreviation
 *  output: customized cspec
 */
-void get_customized_country_code(char *country_iso_code, wl_country_t *cspec)
+void get_customized_country_code(void *adapter, char *country_iso_code, wl_country_t *cspec)
 {
 	int size, i;
 
@@ -323,9 +348,13 @@ void get_customized_country_code(char *country_iso_code, wl_country_t *cspec)
 #define CIS_BUF_SIZE            128
 #elif defined(BCM4334_CHIP)
 #define CIS_BUF_SIZE            256
-#else /* BCM4335_CHIP || BCM4339_CHIP */
+#else
 #define CIS_BUF_SIZE            512
 #endif /* BCM4330_CHIP */
+
+#define CIS_TUPLE_START         0x80
+#define CIS_TUPLE_VENDOR        0x81
+#define CIS_TUPLE_MACADDR       0x19
 
 #ifdef READ_MACADDR
 int dhd_read_macaddr(struct dhd_info *dhd, struct ether_addr *mac)
@@ -839,8 +868,6 @@ static void dhd_dump_cis(const unsigned char *buf, int size)
 
 #define MAX_VID_LEN		8
 #define MAX_VNAME_LEN		16
-#define CIS_TUPLE_START		0x80
-#define CIS_TUPLE_VENDOR	0x81
 
 typedef struct {
 	uint8 vid_length;
@@ -856,10 +883,9 @@ vid_info_t vid_info[] = {
 };
 #elif defined(BCM4334_CHIP)
 vid_info_t vid_info[] = {
-	{ 3, { 0x33, 0x33, }, { "semco" } },
-	{ 3, { 0xfb, 0x50, }, { "semcosh" } },
-	{ 6, { 0x00, 0x20, 0xc7, 0x00, 0x00, }, { "murata" } },
-	{ 0, { 0x00, }, { "samsung" } }
+	{ 6, { 0x00, 0x00, 0x00,0x33, 0x33, }, { "semco" } },
+	{ 6, { 0x00, 0x00 ,0x00,0xfb, 0x50,}, { "semcosh" } },
+	{ 0, { 0x00, }, { "murata" } }
 };
 #elif defined(BCM4335_CHIP)
 vid_info_t vid_info[] = {
@@ -871,16 +897,21 @@ vid_info_t vid_info[] = {
 	{ 3, { 0x00, 0x33, }, { "muratafem3" } },	/* 3rd FEM: Reserved */
 	{ 0, { 0x00, }, { "murata" } }	/* Default: for Murata A0 module */
 };
-#elif defined(BCM4339_CHIP)
+#elif defined(BCM4339_CHIP) || defined(BCM4354_CHIP)
+vid_info_t vid_info[] = {			  /* 4339:2G FEM+5G FEM ,4354: 2G FEM+5G FEM */
+	{ 3, { 0x33, 0x33, }, { "semco" } },      /* 4339:Skyworks+sharp,4354:Panasonic+Panasonic */
+	{ 3, { 0x33, 0x66, }, { "semco" } },      /* 4339:  , 4354:Panasonic+SEMCO */
+	{ 3, { 0x33, 0x88, }, { "semco3rd" } },   /* 4339:  , 4354:SEMCO+SEMCO */
+	{ 3, { 0x90, 0x01, }, { "wisol" } },      /* 4339:  , 4354:Microsemi+Panasonic */
+	{ 3, { 0x90, 0x02, }, { "wisolfem1" } },  /* 4339:  , 4354:Panasonic+Panasonic */
+	{ 3, { 0x90, 0x03, }, { "wisolfem2" } },  /* 4354:Murata+Panasonic */
+	{ 3, { 0x00, 0x11, }, { "muratafem1" } }, /* 4339:  , 4354:Murata+Anadigics */
+	{ 3, { 0x00, 0x22, }, { "muratafem2"} },  /* 4339:  , 4354:Murata+Triquint */
+	{ 0, { 0x00, }, { "samsung" } }           /* Default: Not specified yet */
+};
+#else
 vid_info_t vid_info[] = {
-	{ 3, { 0x33, 0x33, }, { "semco" } },		/* 2G Skyworks + 5G Sharp FEM */
-	{ 3, { 0x33, 0x66, }, { "semco" } },		/* Not specified yet */
-	{ 3, { 0x33, 0x88, }, { "semco3rd" } },		/* Not specified yet */
-	{ 3, { 0x90, 0x01, }, { "wisol" } },		/* Not specified yet */
-	{ 3, { 0x90, 0x02, }, { "wisolfem1" } },	/* Not specified yet */
-	{ 3, { 0x00, 0x11, }, { "muratafem1" } },	/* Not specified yet */
-	{ 3, { 0x00, 0x22, }, { "muratafem2" } },	/* Not specified yet */
-	{ 0, { 0x00, }, { "samsung" } }				/* Default: Not specified yet */
+	{ 0, { 0x00, }, { "samsung" } }			/* Default: Not specified yet */
 };
 #endif /* BCM_CHIP_ID */
 
@@ -1040,12 +1071,6 @@ static int dhd_write_mac_file(const char *filepath, const char *buf, int buf_len
 	return 0;
 }
 
-#if defined(BCM4335_CHIP)|| defined(BCM4339_CHIP)
-#define CIS_MAC_OFFSET 31
-#else
-#define CIS_MAC_OFFSET 33
-#endif /* BCM4335_CHIP || BCM4339_CHIP */
-
 int dhd_check_module_mac(dhd_pub_t *dhd, struct ether_addr *mac)
 {
 	int ret = -1;
@@ -1071,24 +1096,44 @@ int dhd_check_module_mac(dhd_pub_t *dhd, struct ether_addr *mac)
 		sprintf(otp_mac_buf, "%02X:%02X:%02X:%02X:%02X:%02X\n",
 			mac->octet[0], mac->octet[1], mac->octet[2],
 			mac->octet[3], mac->octet[4], mac->octet[5]);
-		DHD_ERROR(("%s: Check module mac by legacy FW : %02X:%02X:%02X\n",
-			__func__, mac->octet[0], mac->octet[4], mac->octet[5]));
+		DHD_ERROR(("%s: Check module mac by legacy FW : " MACDBG "\n",
+			__FUNCTION__, MAC2STRDBG(mac->octet)));
 	} else {
-		unsigned char mac_id[6] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+		int max, idx, macaddr_idx;
 #ifdef DUMP_CIS
 		dhd_dump_cis(cis_buf, 48);
 #endif
-		mac_id[0] = cis_buf[CIS_MAC_OFFSET];
-		mac_id[1] = cis_buf[CIS_MAC_OFFSET + 1];
-		mac_id[2] = cis_buf[CIS_MAC_OFFSET + 2];
-		mac_id[3] = cis_buf[CIS_MAC_OFFSET + 3];
-		mac_id[4] = cis_buf[CIS_MAC_OFFSET + 4];
-		mac_id[5] = cis_buf[CIS_MAC_OFFSET + 5];
+		max = sizeof(cis_buf) - 4;
+		for (idx = 0; idx < max; idx++) {
+			if (cis_buf[idx] == CIS_TUPLE_START) {
+				if (cis_buf[idx + 2] == CIS_TUPLE_MACADDR &&
+					cis_buf[idx + 1] == 7) {
+					macaddr_idx = idx + 3;
+					/* found MAC Address tuple */
+					break;
+				} else {
+					/* Go to next tuple if tuple value
+					 * is not MAC address type
+					 */
+					idx += (cis_buf[idx + 1] + 1);
+				}
+			}
+		}
 
-		sprintf(otp_mac_buf, "%02X:%02X:%02X:%02X:%02X:%02X\n",
-			mac_id[0], mac_id[1], mac_id[2], mac_id[3], mac_id[4],
-			mac_id[5]);
-		DHD_ERROR(("[WIFI]mac_id is setted from OTP \n"));
+		if (idx < max) {
+			sprintf(otp_mac_buf, "%02X:%02X:%02X:%02X:%02X:%02X\n",
+				cis_buf[macaddr_idx], cis_buf[macaddr_idx + 1],
+				cis_buf[macaddr_idx + 2], cis_buf[macaddr_idx + 3],
+				cis_buf[macaddr_idx + 4], cis_buf[macaddr_idx + 5]);
+			DHD_ERROR(("[WIFI]MAC address is taken from OTP\n"));
+		} else {
+			sprintf(otp_mac_buf, "%02X:%02X:%02X:%02X:%02X:%02X\n",
+				mac->octet[0], mac->octet[1], mac->octet[2],
+				mac->octet[3], mac->octet[4], mac->octet[5]);
+			DHD_ERROR(("%s: Cannot find MAC address info from OTP,"
+				" Check module mac by initial value: " MACDBG "\n",
+				__FUNCTION__, MAC2STRDBG(mac->octet)));
+		}
 	}
 
 	fp_mac = filp_open(macfilepath, O_RDONLY, 0);
@@ -1281,6 +1326,16 @@ int dhd_sel_ant_from_file(dhd_pub_t *dhd)
 	uint32 btc_mode = 0;
 	char *filepath = "/data/.ant.info";
 	char iovbuf[WLC_IOCTL_SMLEN];
+	uint chip_id = dhd_bus_chip_id(dhd);
+
+	/* Check if this chip can support MIMO */
+	if (chip_id != BCM4324_CHIP_ID &&
+		chip_id != BCM4350_CHIP_ID &&
+		chip_id != BCM4354_CHIP_ID) {
+		DHD_ERROR(("[WIFI] %s: This chipset does not support MIMO\n",
+			__FUNCTION__));
+		return ret;
+	}
 
 	/* Read antenna settings from the file */
 	fp = filp_open(filepath, O_RDONLY, 0);
@@ -1309,7 +1364,7 @@ int dhd_sel_ant_from_file(dhd_pub_t *dhd)
 	}
 
 	/* bt coex mode off */
-	if (strstr(fw_path, "_mfg") != NULL) {
+	if (dhd_get_fw_mode(dhd->info) == DHD_FLAG_MFG_MODE) {
 		bcm_mkiovar("btc_mode", (char *)&btc_mode, 4, iovbuf, sizeof(iovbuf));
 		ret = dhd_wl_ioctl_cmd(dhd, WLC_SET_VAR, iovbuf, sizeof(iovbuf), TRUE, 0);
 		if (ret) {

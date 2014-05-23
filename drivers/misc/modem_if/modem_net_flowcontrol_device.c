@@ -1,6 +1,7 @@
-/* /linux/drivers/misc/modem_if_v2/modem_net_flowcontrol_device.c
+/* /linux/drivers/misc/modem_if/modem_net_flowcontrol_device.c
  *
- * Copyright (C) 2012 Samsung Electronics.
+ * Copyright (C) 2011 Google, Inc.
+ * Copyright (C) 2011 Samsung Electronics.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -22,7 +23,6 @@
 #include <linux/netdevice.h>
 #include <linux/if_arp.h>
 #include <linux/platform_data/modem.h>
-#include <linux/module.h>
 
 #include "modem_prj.h"
 
@@ -58,7 +58,7 @@ static long modem_net_flowcontrol_device_ioctl(
 	snprintf(dev_name, NET_FLOWCONTROL_DEV_NAME_LEN, "rmnet%d", (int)chan);
 	this_net = get_net_ns_by_pid(current->pid);
 	ndev = __dev_get_by_name(this_net, dev_name);
-	if (unlikely(!ndev)) {
+	if (ndev == NULL) {
 		mif_err("device = %s not exist\n", dev_name);
 		return -ENODEV;
 	}

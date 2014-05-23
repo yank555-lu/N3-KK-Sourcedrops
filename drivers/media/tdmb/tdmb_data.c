@@ -107,14 +107,8 @@ bool tdmb_create_databuffer(unsigned long int_size)
 
 void tdmb_destroy_databuffer(void)
 {
-	if (msc_buff) {
-		vfree(msc_buff);
-		msc_buff = NULL;
-	}
-	if (ts_buff) {
-		vfree(ts_buff);
-		ts_buff = NULL;
-	}
+	vfree(msc_buff);
+	vfree(ts_buff);
 }
 
 bool tdmb_create_workqueue(void)

@@ -1,6 +1,5 @@
 #include "drmP.h"
 #include <linux/usb.h>
-#include <linux/module.h>
 
 int drm_get_usb_dev(struct usb_interface *interface,
 		    const struct usb_device_id *id,
@@ -114,7 +113,3 @@ void drm_usb_exit(struct drm_driver *driver,
 	usb_deregister(udriver);
 }
 EXPORT_SYMBOL(drm_usb_exit);
-
-MODULE_AUTHOR("David Airlie");
-MODULE_DESCRIPTION("USB DRM support");
-MODULE_LICENSE("GPL and additional rights");

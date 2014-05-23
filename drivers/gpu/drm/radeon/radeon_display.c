@@ -533,7 +533,7 @@ static void radeon_crtc_init(struct drm_device *dev, int index)
 		radeon_legacy_init_crtc(dev, radeon_crtc);
 }
 
-static const char *encoder_names[37] = {
+static const char *encoder_names[36] = {
 	"NONE",
 	"INTERNAL_LVDS",
 	"INTERNAL_TMDS1",
@@ -570,7 +570,6 @@ static const char *encoder_names[37] = {
 	"INTERNAL_UNIPHY2",
 	"NUTMEG",
 	"TRAVIS",
-	"INTERNAL_VCE"
 };
 
 static const char *connector_names[15] = {
@@ -1297,7 +1296,7 @@ int radeon_modeset_init(struct radeon_device *rdev)
 	/* init dig PHYs, disp eng pll */
 	if (rdev->is_atom_bios) {
 		radeon_atom_encoder_init(rdev);
-		radeon_atom_disp_eng_pll_init(rdev);
+		radeon_atom_dcpll_init(rdev);
 	}
 
 	/* initialize hpd */

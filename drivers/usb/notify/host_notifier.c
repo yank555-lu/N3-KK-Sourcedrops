@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011-2013 Samsung Electronics Co. Ltd.
+ * Copyright (C) 2011 Samsung Electronics Co. Ltd.
  *  Hyuk Kang <hyuk78.kang@samsung.com>
  *
  * This program is free software; you can redistribute it and/or modify
@@ -9,206 +9,334 @@
  */
 
 #include <linux/module.h>
+#include <linux/irq.h>
+#include <linux/gpio.h>
 #include <linux/delay.h>
+#include <linux/interrupt.h>
 #include <linux/platform_device.h>
-#include <linux/usb/otg.h>
+#include <linux/kthread.h>
+#include <linux/wakelock.h>
 #include <linux/host_notify.h>
-#if defined(CONFIG_MFD_MAX77803)
-#include <linux/mfd/max77803.h>
-#elif defined(CONFIG_MFD_MAX77804K)
-#include <linux/mfd/max77804k.h>
-#endif
-#ifdef pr_fmt
-#undef pr_fmt
-#endif
-#define pr_fmt(fmt) "notifier %s %d: " fmt, __func__, __LINE__
 
-struct  hnotifier_info {
-	struct usb_phy *phy;
-	struct host_notify_dev ndev;
-	struct work_struct noti_work;
-	struct booster_data *booster;
+#if defined(CONFIG_FAST_BOOT)
+#include <linux/fake_shut_down.h>
+#endif
 
-	int event;
-	int prev_event;
+struct  host_notifier_info {
+	struct host_notifier_platform_data *pdata;
+	struct task_struct *th;
+	struct wake_lock	wlock;
+	struct delayed_work current_dwork;
+	wait_queue_head_t	delay_wait;
+	int	thread_remove;
+	int currentlimit_irq;
+#if defined(CONFIG_FAST_BOOT)
+	struct notifier_block fsd_notifier_block;
+#endif
 };
 
-static struct hnotifier_info ninfo = {
-	.ndev.name = "usb_otg",
-};
+static struct host_notifier_info ninfo;
 
-extern int sec_handle_event(int enable);
-static int safe_boost(struct hnotifier_info *pinfo, int enable)
+static int currentlimit_thread(void *data)
 {
-	if (pinfo && pinfo->booster) {
-		pinfo->booster->boost(enable);
-		return 0;
-	} else {
-		pr_err("Error! No booster.\n");
-		return -1;
-	}
-}
-
-static int host_notifier_booster(int enable, struct host_notify_dev *ndev)
-{
-	struct hnotifier_info *pinfo;
+	struct host_notifier_info *ninfo = data;
+	struct host_notify_dev *ndev = &ninfo->pdata->ndev;
+	int gpio = ninfo->pdata->gpio;
+	int prev = ndev->booster;
 	int ret = 0;
-	pr_info("booster %s\n", enable ? "ON" : "OFF");
 
-	pinfo = container_of(ndev, struct hnotifier_info, ndev);
-	safe_boost(pinfo, enable);
+	pr_info("host_notifier usbhostd: start %d\n", prev);
 
-	return ret;
-}
+	while (!kthread_should_stop()) {
+		wait_event_interruptible_timeout(ninfo->delay_wait,
+				ninfo->thread_remove, 1 * HZ);
 
-static void hnotifier_work(struct work_struct *w)
-{
-	struct hnotifier_info *pinfo;
-	int event;
+		ret = gpio_get_value(gpio);
+		if (prev != ret) {
+			pr_info("host_notifier usbhostd: gpio %d = %s\n",
+					gpio, ret ? "HIGH" : "LOW");
+			ndev->booster = ret ?
+				NOTIFY_POWER_ON : NOTIFY_POWER_OFF;
+			prev = ret;
 
-	pinfo = container_of(w, struct hnotifier_info, noti_work);
-	event = pinfo->event;
-	pr_info("hnotifier_work : event %d\n", pinfo->event);
-
-	switch (event) {
-	case HNOTIFY_NONE:
-	case HNOTIFY_VBUS: break;
-	case HNOTIFY_ID:
-		pr_info("!ID\n");
-		host_state_notify(&pinfo->ndev,	NOTIFY_HOST_ADD);
-		safe_boost(pinfo, 1);
-		sec_handle_event(1);
-		break;
-	case HNOTIFY_ENUMERATED:
-	case HNOTIFY_CHARGER: break;
-	case HNOTIFY_ID_PULL:
-		pr_info("ID\n");
-		host_state_notify(&pinfo->ndev,	NOTIFY_HOST_REMOVE);
-		sec_handle_event(0);
-		safe_boost(pinfo, 0);
-		break;
-	case HNOTIFY_OVERCURRENT:
-		pr_info("OVP\n");
-		host_state_notify(&pinfo->ndev,	NOTIFY_HOST_OVERCURRENT);
-		break;
-	case HNOTIFY_OTG_POWER_ON:
-		pinfo->ndev.booster = NOTIFY_POWER_ON;
-		break;
-	case HNOTIFY_OTG_POWER_OFF:
-		pinfo->ndev.booster = NOTIFY_POWER_OFF;
-		break;
-	case HNOTIFY_SMARTDOCK_ON:
-		sec_handle_event(1);
-		break;
-	case HNOTIFY_SMARTDOCK_OFF:
-		sec_handle_event(0);
-		break;
-	case HNOTIFY_AUDIODOCK_ON:
-		sec_handle_event(1);
-		break;
-	case HNOTIFY_AUDIODOCK_OFF:
-		sec_handle_event(0);
-		break;
-	case HNOTIFY_LANHUB_ON:
-		host_state_notify(&pinfo->ndev,	NOTIFY_HOST_ADD);
-		sec_handle_event(1);
-		break;
-	case HNOTIFY_LANHUB_OFF:
-		host_state_notify(&pinfo->ndev,	NOTIFY_HOST_REMOVE);
-		sec_handle_event(0);
-		break;
-	case HNOTIFY_LANHUBTA_ON:
-		safe_boost(pinfo, 2);
-		break;
-	case HNOTIFY_LANHUBTA_OFF:
-		safe_boost(pinfo, 1);
-		break;
-	default:
-		break;
+			if (!ret && ndev->mode == NOTIFY_HOST_MODE) {
+				host_state_notify(ndev,
+						NOTIFY_HOST_OVERCURRENT);
+				pr_err("host_notifier usbhostd: overcurrent\n");
+				break;
+			}
+		}
 	}
 
-#if 0
-	atomic_notifier_call_chain(&pinfo->phy->notifier,
-		event, pinfo);
-#endif
-}
+	ninfo->thread_remove = 1;
 
-int sec_otg_notify(int event)
-{
-	pr_info("sec_otg_notify : %d\n", event);
-	ninfo.prev_event = ninfo.event;
-	ninfo.event = event;
-
-	if (ninfo.phy)
-		schedule_work(&ninfo.noti_work);
+	pr_info("host_notifier usbhostd: exit %d\n", ret);
 	return 0;
 }
-EXPORT_SYMBOL(sec_otg_notify);
 
-int sec_otg_register_booster(struct booster_data *booster)
+static int start_usbhostd_thread(void)
+{
+	if (!ninfo.th) {
+		pr_info("host_notifier: start usbhostd thread\n");
+
+		init_waitqueue_head(&ninfo.delay_wait);
+		ninfo.thread_remove = 0;
+		ninfo.th = kthread_run(currentlimit_thread,
+				&ninfo, "usbhostd");
+
+		if (IS_ERR(ninfo.th)) {
+			pr_err("host_notifier: Unable to start usbhostd\n");
+			ninfo.th = NULL;
+			ninfo.thread_remove = 1;
+			return -1;
+		}
+		host_state_notify(&ninfo.pdata->ndev, NOTIFY_HOST_ADD);
+		wake_lock(&ninfo.wlock);
+
+	} else
+		pr_info("host_notifier: usbhostd already started!\n");
+
+	return 0;
+}
+
+static int stop_usbhostd_thread(void)
+{
+	if (ninfo.th) {
+		pr_info("host_notifier: stop thread\n");
+
+		if (!ninfo.thread_remove)
+			kthread_stop(ninfo.th);
+
+		ninfo.th = NULL;
+		host_state_notify(&ninfo.pdata->ndev, NOTIFY_HOST_REMOVE);
+		wake_unlock(&ninfo.wlock);
+	} else
+		pr_info("host_notifier: no thread\n");
+
+	return 0;
+}
+
+int start_usbhostd_wakelock(void)
+{
+	pr_info("host_notifier: start usbhostd wakelock\n");
+	wake_lock(&ninfo.wlock);
+
+	return 0;
+}
+
+int stop_usbhostd_wakelock(void)
+{
+	pr_info("host_notifier: stop usbhostd wakelock\n");
+	wake_unlock(&ninfo.wlock);
+
+	return 0;
+}
+
+#if defined(CONFIG_MACH_P4NOTE) || defined(CONFIG_MACH_SP7160LTE) || defined(CONFIG_MACH_KONA)
+void host_notifier_enable_irq(void)
+{
+	pr_info("host_notifier: %s\n", __func__);
+	enable_irq(ninfo.currentlimit_irq);
+}
+
+void host_notifier_disable_irq(void)
+{
+	pr_info("host_notifier: %s\n", __func__);
+	disable_irq(ninfo.currentlimit_irq);
+}
+#endif
+static int start_usbhostd_notify(void)
+{
+	pr_info("host_notifier: start usbhostd notify\n");
+#if defined(CONFIG_MACH_P4NOTE) || defined(CONFIG_MACH_SP7160LTE) || defined(CONFIG_MACH_KONA)
+	host_notifier_enable_irq();
+#endif
+
+	host_state_notify(&ninfo.pdata->ndev, NOTIFY_HOST_ADD);
+	wake_lock(&ninfo.wlock);
+
+	return 0;
+}
+
+static int stop_usbhostd_notify(void)
+{
+	pr_info("host_notifier: stop usbhostd notify\n");
+#if defined(CONFIG_MACH_P4NOTE) || defined(CONFIG_MACH_SP7160LTE) || defined(CONFIG_MACH_KONA)
+	host_notifier_disable_irq();
+#endif
+
+	host_state_notify(&ninfo.pdata->ndev, NOTIFY_HOST_REMOVE);
+	wake_unlock(&ninfo.wlock);
+
+	return 0;
+}
+
+static void host_notifier_booster(int enable)
+{
+	pr_info("host_notifier: booster %s\n", enable ? "ON" : "OFF");
+#if defined(CONFIG_MACH_P4NOTE) || defined(CONFIG_MACH_SP7160LTE) || defined(CONFIG_MACH_KONA)
+	if (enable)
+		host_notifier_enable_irq();
+	else
+		host_notifier_disable_irq();
+#endif
+	ninfo.pdata->booster(enable);
+
+	if (ninfo.pdata->thread_enable) {
+		if (enable)
+			start_usbhostd_thread();
+		else
+			stop_usbhostd_thread();
+	}
+}
+
+static irqreturn_t currentlimit_irq_thread(int irq, void *data)
+{
+	struct host_notifier_info *hostinfo = data;
+	struct host_notify_dev *ndev = &hostinfo->pdata->ndev;
+	int gpio = hostinfo->pdata->gpio;
+	int prev = ndev->booster;
+	int ret = 0;
+
+	ret = gpio_get_value(gpio);
+	pr_info("currentlimit_irq_thread gpio : %d, value : %d\n", gpio, ret);
+
+	if (prev != ret) {
+		pr_info("host_notifier currentlimit_irq_thread: gpio %d = %s\n",
+				gpio, ret ? "HIGH" : "LOW");
+		ndev->booster = ret ?
+			NOTIFY_POWER_ON : NOTIFY_POWER_OFF;
+		prev = ret;
+
+		if (!ret && ndev->mode == NOTIFY_HOST_MODE) {
+			host_state_notify(ndev,
+					NOTIFY_HOST_OVERCURRENT);
+			pr_err("host_notifier currentlimit_irq_thread: overcurrent\n");
+		}
+	}
+	return IRQ_HANDLED;
+}
+
+static int currentlimit_irq_init(struct host_notifier_info *hostinfo)
 {
 	int ret = 0;
-	if (ninfo.booster) {
-		pr_err("booster %s is already registered.\n", ninfo.booster->name);
-		return -EBUSY;
-	}
 
-	if (booster && booster->name && booster->boost) {
-		pr_info("register %s\n", booster->name);
-		ninfo.booster = booster;
+	hostinfo->currentlimit_irq = gpio_to_irq(hostinfo->pdata->gpio);
+
+	ret = request_threaded_irq(hostinfo->currentlimit_irq, NULL,
+			currentlimit_irq_thread,
+			IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING,
+			"overcurrent_detect", hostinfo);
+	if (ret)
+		pr_info("host_notifier: %s return : %d\n", __func__, ret);
+#if defined(CONFIG_MACH_P4NOTE) || defined(CONFIG_MACH_SP7160LTE) || defined(CONFIG_MACH_KONA)
+	host_notifier_disable_irq();
+#endif
+
+	return ret;
+}
+
+static void currentlimit_irq_work(struct work_struct *work)
+{
+	int retval;
+	struct host_notifier_info *hostinfo = container_of(work,
+			struct host_notifier_info, current_dwork.work);
+
+	retval = currentlimit_irq_init(hostinfo);
+
+	if (retval)
+		pr_err("host_notifier: %s retval : %d\n", __func__, retval);
+	return;
+}
+
+#if defined(CONFIG_FAST_BOOT)
+static bool restart_hostd;
+static int fsd_host_notifier_call(struct notifier_block *nb,
+		unsigned long cmd, void *_param)
+{
+	if (cmd == FAKE_SHUT_DOWN_CMD_ON) {
+		pr_info("%s: fake shut down ", __func__);
+		host_notifier_booster(0);
+		stop_usbhostd_wakelock();
+		restart_hostd = true;
 	} else {
-		pr_err("register failed\n");
-		ret = -ENODATA;
+		if (restart_hostd) {
+			pr_info("%s: fake shut down ", __func__);
+			restart_hostd = false;
+			if (ninfo.pdata->is_host_working) {
+				host_notifier_booster(1);
+				start_usbhostd_wakelock();
+			}
+		}
 	}
-	return ret;
+	return 0;
 }
-EXPORT_SYMBOL(sec_otg_register_booster);
-
-int sec_get_notification(int ndata)
-{
-	int ret = 0;
-
-	if (HNOTIFY_EVENT == ndata)
-		ret = ninfo.event;
-	else if (HNOTIFY_MODE == ndata)
-		ret = ninfo.ndev.mode;
-
-	pr_info("ndata %d : %d\n", ndata, ret);
-	return ret;
-}
-EXPORT_SYMBOL(sec_get_notification);
+#endif
 
 static int host_notifier_probe(struct platform_device *pdev)
 {
 	int ret = 0;
 
-	dev_info(&pdev->dev, "notifier_probe\n");
+	if (pdev && pdev->dev.platform_data)
+		ninfo.pdata = pdev->dev.platform_data;
+	else {
+		pr_err("host_notifier: platform_data is null.\n");
+		return -ENODEV;
+	}
 
-	ninfo.ndev.set_booster = host_notifier_booster;
-	ninfo.phy = usb_get_transceiver();
-	ATOMIC_INIT_NOTIFIER_HEAD(&ninfo.phy->notifier);
+	dev_info(&pdev->dev, "notifier_prove\n");
 
-	ret = host_notify_dev_register(&ninfo.ndev);
+	if (ninfo.pdata->thread_enable) {
+		ret = gpio_request(ninfo.pdata->gpio, "host_notifier");
+		if (ret) {
+			dev_err(&pdev->dev, "failed to request %d\n",
+				ninfo.pdata->gpio);
+			return -EPERM;
+		}
+		gpio_direction_input(ninfo.pdata->gpio);
+		dev_info(&pdev->dev, "gpio = %d\n", ninfo.pdata->gpio);
+
+		ninfo.pdata->ndev.set_booster = host_notifier_booster;
+		ninfo.pdata->usbhostd_start = start_usbhostd_thread;
+		ninfo.pdata->usbhostd_stop = stop_usbhostd_thread;
+	} else if (ninfo.pdata->irq_enable) {
+		INIT_DELAYED_WORK(&ninfo.current_dwork, currentlimit_irq_work);
+		schedule_delayed_work(&ninfo.current_dwork,
+				msecs_to_jiffies(10000));
+		ninfo.pdata->ndev.set_booster = host_notifier_booster;
+		ninfo.pdata->usbhostd_start = start_usbhostd_notify;
+		ninfo.pdata->usbhostd_stop = stop_usbhostd_notify;
+	} else {
+		ninfo.pdata->ndev.set_booster = host_notifier_booster;
+		ninfo.pdata->usbhostd_start = start_usbhostd_notify;
+		ninfo.pdata->usbhostd_stop = stop_usbhostd_notify;
+	}
+
+	ret = host_notify_dev_register(&ninfo.pdata->ndev);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "Failed to host_notify_dev_register\n");
 		return ret;
 	}
-	INIT_WORK(&ninfo.noti_work, hnotifier_work);
+
+#if defined(CONFIG_FAST_BOOT)
+	ninfo.fsd_notifier_block.notifier_call = fsd_host_notifier_call;
+	register_fake_shut_down_notifier(&ninfo.fsd_notifier_block);
+#endif
+	wake_lock_init(&ninfo.wlock, WAKE_LOCK_SUSPEND, "hostd");
 
 	return 0;
 }
 
 static int host_notifier_remove(struct platform_device *pdev)
 {
-	cancel_work_sync(&ninfo.noti_work);
-	host_notify_dev_unregister(&ninfo.ndev);
+#if defined(CONFIG_FAST_BOOT)
+	unregister_fake_shut_down_notifier(&ninfo.fsd_notifier_block);
+#endif
+	/* gpio_free(ninfo.pdata->gpio); */
+	host_notify_dev_unregister(&ninfo.pdata->ndev);
+	wake_lock_destroy(&ninfo.wlock);
 	return 0;
 }
-
-static struct of_device_id host_notifier_of_match[] = {
-	{	.compatible = "sec,host-notifier", },
-	{}
-};
 
 static struct platform_driver host_notifier_driver = {
 	.probe		= host_notifier_probe,
@@ -216,10 +344,22 @@ static struct platform_driver host_notifier_driver = {
 	.driver		= {
 		.name	= "host_notifier",
 		.owner	= THIS_MODULE,
-		.of_match_table = host_notifier_of_match,
 	},
 };
-module_platform_driver(host_notifier_driver);
+
+
+static int __init host_notifier_init(void)
+{
+	return platform_driver_register(&host_notifier_driver);
+}
+
+static void __init host_notifier_exit(void)
+{
+	platform_driver_unregister(&host_notifier_driver);
+}
+
+module_init(host_notifier_init);
+module_exit(host_notifier_exit);
 
 MODULE_AUTHOR("Hyuk Kang <hyuk78.kang@samsung.com>");
 MODULE_DESCRIPTION("USB Host notifier");

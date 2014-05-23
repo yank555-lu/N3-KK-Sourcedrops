@@ -37,24 +37,16 @@
 #elif defined(CONFIG_CHARGER_BQ24190) || \
 		defined(CONFIG_CHARGER_BQ24191)
 #include <linux/battery/charger/bq24190_charger.h>
+#elif defined(CONFIG_CHARGER_BQ24260)
+#include <linux/battery/charger/bq24260_charger.h>
 #elif defined(CONFIG_CHARGER_NCP1851)
 #include <linux/battery/charger/ncp1851_charger.h>
 #elif defined(CONFIG_CHARGER_TSU8111)
 #include <linux/battery/charger/tsu8111_charger.h>
 #elif defined(CONFIG_CHARGER_MAX77693)
 #include <linux/battery/charger/max77693_charger.h>
-#elif defined(CONFIG_CHARGER_MAX77803)
-#include <linux/battery/charger/max77803_charger.h>
-#elif defined(CONFIG_CHARGER_MAX77804K)
-#include <linux/battery/charger/max77804k_charger.h>
-#elif defined(CONFIG_CHARGER_MAX77888)
-#include <linux/battery/charger/max77888_charger.h>
-#elif defined(CONFIG_CHARGER_MAX77823)
-#include <linux/battery/charger/max77823_charger.h>
-#endif
-
-#if defined(CONFIG_CHARGER_BQ24260)
-#include <linux/battery/charger/bq24260_charger.h>
+#elif defined(CONFIG_CHARGER_MAX77693_BAT)
+#include <linux/battery/charger/max77693_charger_bat.h>
 #endif
 
 struct sec_charger_info {
@@ -79,7 +71,6 @@ struct sec_charger_info {
 
 bool sec_hal_chg_init(struct i2c_client *);
 bool sec_hal_chg_suspend(struct i2c_client *);
-bool sec_hal_chg_shutdown(struct i2c_client *);
 bool sec_hal_chg_resume(struct i2c_client *);
 bool sec_hal_chg_get_property(struct i2c_client *,
 				enum power_supply_property,
@@ -115,5 +106,4 @@ enum {
 	CHG_REGS,
 };
 
-extern sec_battery_platform_data_t sec_battery_pdata;
 #endif /* __SEC_CHARGER_H */

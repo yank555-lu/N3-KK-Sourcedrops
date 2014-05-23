@@ -17,27 +17,40 @@
  *  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
-#include "table_msm8974.h"
+#ifndef _LINUX_WACOM_I2C_COORD_TABLE_H
+#define _LINUX_WACOM_I2C_COORD_TABLE_H
 
-/* Origin Shift */
-#if defined(CONFIG_SEC_VIENNA_PROJECT) || defined(CONFIG_SEC_LT03_PROJECT)
-short origin_offset[] = {0, 0};
+/*Tables*/
+#if defined(CONFIG_MACH_Q1_BD)
+#include "table-q1.h"
+#elif defined(CONFIG_MACH_T0)
+
+/*Locale*/
+#if defined(CONFIG_TARGET_LOCALE_KOR)
+#include "table-t0ltekors.h"
+#elif defined(CONFIG_MACH_T0_JPN_LTE_DCM)
+#include "table-t0ltedcm.h"
+#elif defined(CONFIG_MACH_T0_USA_VZW) \
+	|| defined(CONFIG_MACH_T0_USA_SPR)
+#include "table-t0vzw.h"
+#elif defined(CONFIG_MACH_T0_USA_USCC)
+#include "table-t0uscc.h"
+#elif defined(CONFIG_MACH_T0_CHN_CTC)
+#include "table-t0chnctc.h"
 #else
-short origin_offset[] = {752, 643};
+/*CONFIG_MACH_T0_EUR_OPEN*/
+#include "table-t03g.h"
 #endif
 
-/* Tilt offset */
-/* 0: Left, 1: Right */
-/* 0: Portrait 0, 1: Landscape 90, 2: Portrait 180 3: Landscape 270*/
-short tilt_offsetX_B887[MAX_HAND][MAX_ROTATION] = \
-{{0, 0, 0, 0, }, {-180, 85, 100, -50, } };
-/*{{85, 100, -50, -85, }, {-180, 0, 100, 0, } };*/
-short tilt_offsetY_B887[MAX_HAND][MAX_ROTATION] = \
-{{0, 0, 0, 0, }, {-140, -90, 120, 100, } };
-/*{{-90, 120, 100, -80, }, {-50, -180, 120, 0, } };*/
+#endif
 
-char *tuning_version_B887 = "1320";
 
+/* Origin Shift */
+#if defined(CONFIG_MACH_Q1_BD)
+short origin_offset[] = {600, 620};
+short origin_offset_48[] = {720, 760};
+#elif defined(CONFIG_MACH_T0)
+short origin_offset[] = {676, 724};
 
 short tilt_offsetX_B713[MAX_HAND][MAX_ROTATION] = \
 {{85, 100, -50, -85, }, {-85, 85, 100, -50, } };
@@ -45,6 +58,7 @@ short tilt_offsetY_B713[MAX_HAND][MAX_ROTATION] = \
 {{-90, 120, 100, -80, }, {-80, -90, 120, 100, } };
 
 char *tuning_version_B713 = "0730";
+#endif
 
 /* Distance Offset Table */
 short *tableX[MAX_HAND][MAX_ROTATION] = \
@@ -54,3 +68,6 @@ short *tableX[MAX_HAND][MAX_ROTATION] = \
 short *tableY[MAX_HAND][MAX_ROTATION] = \
 	{{TblY_PLeft_44, TblY_CCW_LLeft_44, TblY_CW_LRight_44, TblY_PRight_44},
 	{TblY_PRight_44, TblY_PLeft_44, TblY_CCW_LLeft_44, TblY_CW_LRight_44} };
+
+#endif /* _LINUX_WACOM_I2C_COORD_TABLE_H */
+

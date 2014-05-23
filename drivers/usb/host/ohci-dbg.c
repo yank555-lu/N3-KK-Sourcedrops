@@ -82,14 +82,6 @@ urb_print(struct urb * urb, char * str, int small, int status)
 		ohci_dbg(ohci,format, ## arg ); \
 	} while (0);
 
-/* Version for use where "next" is the address of a local variable */
-#define ohci_dbg_nosw(ohci, next, size, format, arg...) \
-	do { \
-		unsigned s_len; \
-		s_len = scnprintf(*next, *size, format, ## arg); \
-		*size -= s_len; *next += s_len; \
-	} while (0);
-
 
 static void ohci_dump_intr_mask (
 	struct ohci_hcd *ohci,
@@ -135,19 +127,6 @@ static char *hcfs2string (int state)
 	return "?";
 }
 
-static const char *rh_state_string(struct ohci_hcd *ohci)
-{
-	switch (ohci->rh_state) {
-	case OHCI_RH_HALTED:
-		return "halted";
-	case OHCI_RH_SUSPENDED:
-		return "suspended";
-	case OHCI_RH_RUNNING:
-		return "running";
-	}
-	return "?";
-}
-
 // dump control and status registers
 static void
 ohci_dump_status (struct ohci_hcd *controller, char **next, unsigned *size)
@@ -157,10 +136,9 @@ ohci_dump_status (struct ohci_hcd *controller, char **next, unsigned *size)
 
 	temp = ohci_readl (controller, &regs->revision) & 0xff;
 	ohci_dbg_sw (controller, next, size,
-		"OHCI %d.%d, %s legacy support registers, rh state %s\n",
+		"OHCI %d.%d, %s legacy support registers\n",
 		0x03 & (temp >> 4), (temp & 0x0f),
-		(temp & 0x0100) ? "with" : "NO",
-		rh_state_string(controller));
+		(temp & 0x0100) ? "with" : "NO");
 
 	temp = ohci_readl (controller, &regs->control);
 	ohci_dbg_sw (controller, next, size,
@@ -661,7 +639,7 @@ static ssize_t fill_registers_buffer(struct debug_buffer *buf)
 
 	/* dump driver info, then registers in spec order */
 
-	ohci_dbg_nosw(ohci, &next, &size,
+	ohci_dbg_sw (ohci, &next, &size,
 		"bus %s, device %s\n"
 		"%s\n"
 		"%s\n",
@@ -680,7 +658,7 @@ static ssize_t fill_registers_buffer(struct debug_buffer *buf)
 
 	/* hcca */
 	if (ohci->hcca)
-		ohci_dbg_nosw(ohci, &next, &size,
+		ohci_dbg_sw (ohci, &next, &size,
 			"hcca frame 0x%04x\n", ohci_frame_no(ohci));
 
 	/* other registers mostly affect frame timings */
@@ -858,6 +836,10 @@ periodic_error:
 async_error:
 	debugfs_remove(ohci->debug_dir);
 dir_error:
+#if defined(CONFIG_LINK_DEVICE_HSIC)
+/* Clear the previous debugfs dentry when OHCI on/off debugfs fail case */
+	ohci->debug_registers = NULL;
+#endif
 	ohci->debug_periodic = NULL;
 	ohci->debug_async = NULL;
 	ohci->debug_dir = NULL;

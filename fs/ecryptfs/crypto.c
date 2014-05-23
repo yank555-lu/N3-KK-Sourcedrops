@@ -37,12 +37,6 @@
 #include <asm/unaligned.h>
 #include "ecryptfs_kernel.h"
 
-#ifdef CONFIG_CRYPTO_FIPS
-#include <crypto/rng.h>
-#define SEED_LEN 32
-static int cc_mode;
-#endif
-
 static int
 ecryptfs_decrypt_page_offset(struct ecryptfs_crypt_stat *crypt_stat,
 			     struct page *dst_page, int dst_offset,
@@ -53,99 +47,6 @@ ecryptfs_encrypt_page_offset(struct ecryptfs_crypt_stat *crypt_stat,
 			     struct page *dst_page, int dst_offset,
 			     struct page *src_page, int src_offset, int size,
 			     unsigned char *iv);
-
-#ifdef CONFIG_CRYPTO_FIPS
-void ecryptfs_cc_mode_set(int mode)
-{
-    cc_mode = mode;
-}
-
-static int crypto_cc_reset_rng(struct crypto_rng *tfm)
-{
-    char *seed = NULL;
-    int read_bytes = 0;
-    int trialcount = 10;
-    int err = 0;
-    struct file *filp = NULL;
-    mm_segment_t oldfs;
-
-    seed = kmalloc(SEED_LEN, GFP_KERNEL);
-    if (!seed) {
-        ecryptfs_printk(KERN_ERR, "Failed to get memory space for seed\n");
-        goto out;
-    }
-
-    filp = filp_open("/dev/random", O_RDONLY, 0);
-    if (IS_ERR(filp)) {
-		ecryptfs_printk(KERN_ERR, "Failed to open /dev/random\n");
-        goto out;
-    }
-
-    oldfs = get_fs();
-    set_fs(KERNEL_DS);
-    memset((void *)seed, 0, SEED_LEN);
-
-    while (trialcount > 0) {
-        read_bytes += filp->f_op->read(filp, &(seed[read_bytes]), SEED_LEN-read_bytes, &filp->f_pos);
-
-        if (read_bytes != SEED_LEN)
-            trialcount--;
-        else
-            break;
-    }
-    set_fs(oldfs);
-
-    if (read_bytes != SEED_LEN) {
-        ecryptfs_printk(KERN_ERR, "Failed to get enough random bytes (read=%d/request=%d)\n", read_bytes, SEED_LEN);
-        err = -1;
-        goto out;
-    }
-
-    err = crypto_rng_reset(tfm, seed, SEED_LEN);
-    if (err)
-        crypto_free_rng(tfm);
-
-out:
-    if (seed) kfree(seed);
-    if (filp) filp_close(filp, NULL);
-    return err;
-}
-
-/**
- * crypto_cc_rng_get_bytes
- * @data: Buffer to get random bytes
- * @len: the lengh of random bytes
- */
-static int crypto_cc_rng_get_bytes(u8 *data, unsigned int len)
-{
-    static struct crypto_rng *crypto_cc_rng = NULL;
-    struct crypto_rng *rng;
-    int err = 0;
-
-    if (!crypto_cc_rng) {
-        rng = crypto_alloc_rng("fips(ansi_cprng)", 0, 0);
-        err = PTR_ERR(rng);
-        if (IS_ERR(rng))
-            goto out;
-
-        err = crypto_cc_reset_rng(rng);
-        if (err) {
-            crypto_free_rng(rng);
-            goto out;
-        }
-        crypto_cc_rng = rng;
-    }
-
-    err = crypto_rng_get_bytes(crypto_cc_rng, data, len);
-
-    if (err != len)
-        ecryptfs_printk(KERN_ERR, "Error getting random bytes in CC mode (err=%d, len=%d)\n", err, len);
-
-out:
-    return err;
-
-}
-#endif
 
 /**
  * ecryptfs_to_hex
@@ -180,69 +81,6 @@ void ecryptfs_from_hex(char *dst, char *src, int dst_size)
 		dst[x] = (unsigned char)simple_strtol(tmp, NULL, 16);
 	}
 }
-
-#ifdef CONFIG_CRYPTO_FIPS
-/**
- * ecryptfs_calculate_sha256 - calculates the sha256 of @src
- * @dst: Pointer to 32 bytes of allocated memory
- * @crypt_stat: Pointer to crypt_stat struct for the current inode
- * @src: Data to be sha256'd
- * @len: Length of @src
- *
- * Uses the allocated crypto context that crypt_stat references to
- * generate the SHA256 sum of the contents of src.
- */
-static int ecryptfs_calculate_sha256(char *dst,
-				  struct ecryptfs_crypt_stat *crypt_stat,
-				  char *src, int len)
-{
-	struct scatterlist sg;
-	struct hash_desc desc = {
-		.tfm = crypt_stat->hash_tfm,
-		.flags = CRYPTO_TFM_REQ_MAY_SLEEP
-	};
-	int rc = 0;
-
-	mutex_lock(&crypt_stat->cs_hash_tfm_mutex);
-	sg_init_one(&sg, (u8 *)src, len);
-	if (!desc.tfm) {
-		desc.tfm = crypto_alloc_hash(ECRYPTFS_SHA256_HASH, 0,
-					     CRYPTO_ALG_ASYNC);
-		if (IS_ERR(desc.tfm)) {
-			rc = PTR_ERR(desc.tfm);
-			ecryptfs_printk(KERN_ERR, "Error attempting to "
-					"allocate crypto context; rc = [%d]\n",
-					rc);
-			goto out;
-		}
-		crypt_stat->hash_tfm = desc.tfm;
-	}
-	rc = crypto_hash_init(&desc);
-	if (rc) {
-		printk(KERN_ERR
-		       "%s: Error initializing crypto hash; rc = [%d]\n",
-		       __func__, rc);
-		goto out;
-	}
-	rc = crypto_hash_update(&desc, &sg, len);
-	if (rc) {
-		printk(KERN_ERR
-		       "%s: Error updating crypto hash; rc = [%d]\n",
-		       __func__, rc);
-		goto out;
-	}
-	rc = crypto_hash_final(&desc, dst);
-	if (rc) {
-		printk(KERN_ERR
-		       "%s: Error finalizing crypto hash; rc = [%d]\n",
-		       __func__, rc);
-		goto out;
-	}
-out:
-	mutex_unlock(&crypt_stat->cs_hash_tfm_mutex);
-	return rc;
-}
-#endif
 
 /**
  * ecryptfs_calculate_md5 - calculates the md5 of @src
@@ -342,12 +180,8 @@ int ecryptfs_derive_iv(char *iv, struct ecryptfs_crypt_stat *crypt_stat,
 		       loff_t offset)
 {
 	int rc = 0;
-	char src[ECRYPTFS_MAX_IV_BYTES + 16];
-#ifdef CONFIG_CRYPTO_FIPS
-	char dst[SHA256_HASH_SIZE];
-#else
 	char dst[MD5_DIGEST_SIZE];
-#endif
+	char src[ECRYPTFS_MAX_IV_BYTES + 16];
 
 	if (unlikely(ecryptfs_verbosity > 0)) {
 		ecryptfs_printk(KERN_DEBUG, "root iv:\n");
@@ -364,12 +198,8 @@ int ecryptfs_derive_iv(char *iv, struct ecryptfs_crypt_stat *crypt_stat,
 		ecryptfs_printk(KERN_DEBUG, "source:\n");
 		ecryptfs_dump_hex(src, (crypt_stat->iv_bytes + 16));
 	}
-#ifdef CONFIG_CRYPTO_FIPS
-	if (cc_mode)
-		rc = ecryptfs_calculate_sha256(dst, crypt_stat, src, (crypt_stat->iv_bytes + 16));
-	else
-#endif
-		rc = ecryptfs_calculate_md5(dst, crypt_stat, src, (crypt_stat->iv_bytes + 16));
+	rc = ecryptfs_calculate_md5(dst, crypt_stat, src,
+				    (crypt_stat->iv_bytes + 16));
 	if (rc) {
 		ecryptfs_printk(KERN_WARNING, "Error attempting to compute "
 				"MD5 while generating IV for a page\n");
@@ -982,11 +812,7 @@ void ecryptfs_set_default_sizes(struct ecryptfs_crypt_stat *crypt_stat)
 int ecryptfs_compute_root_iv(struct ecryptfs_crypt_stat *crypt_stat)
 {
 	int rc = 0;
-#ifdef CONFIG_CRYPTO_FIPS
-	char dst[SHA256_HASH_SIZE];
-#else
 	char dst[MD5_DIGEST_SIZE];
-#endif
 
 	BUG_ON(crypt_stat->iv_bytes > MD5_DIGEST_SIZE);
 	BUG_ON(crypt_stat->iv_bytes <= 0);
@@ -996,12 +822,8 @@ int ecryptfs_compute_root_iv(struct ecryptfs_crypt_stat *crypt_stat)
 				"cannot generate root IV\n");
 		goto out;
 	}
-#ifdef CONFIG_CRYPTO_FIPS
-	if (cc_mode)
-		rc = ecryptfs_calculate_sha256(dst, crypt_stat, crypt_stat->key, crypt_stat->key_size);
-	else
-#endif
-		rc = ecryptfs_calculate_md5(dst, crypt_stat, crypt_stat->key, crypt_stat->key_size);
+	rc = ecryptfs_calculate_md5(dst, crypt_stat, crypt_stat->key,
+				    crypt_stat->key_size);
 	if (rc) {
 		ecryptfs_printk(KERN_WARNING, "Error attempting to compute "
 				"MD5 while generating root IV\n");
@@ -1018,11 +840,7 @@ out:
 
 static void ecryptfs_generate_new_key(struct ecryptfs_crypt_stat *crypt_stat)
 {
-#ifdef CONFIG_CRYPTO_FIPS
-	crypto_cc_rng_get_bytes(crypt_stat->key, crypt_stat->key_size);
-#else
 	get_random_bytes(crypt_stat->key, crypt_stat->key_size);
-#endif
 	crypt_stat->flags |= ECRYPTFS_KEY_VALID;
 	ecryptfs_compute_root_iv(crypt_stat);
 	if (unlikely(ecryptfs_verbosity > 0)) {
@@ -1110,7 +928,7 @@ static void ecryptfs_set_default_crypt_stat_vals(
 
 /**
  * ecryptfs_new_file_context
- * @ecryptfs_inode: The eCryptfs inode
+ * @ecryptfs_dentry: The eCryptfs dentry
  *
  * If the crypto context for the file has not yet been established,
  * this is where we do that.  Establishing a new crypto context
@@ -1127,13 +945,13 @@ static void ecryptfs_set_default_crypt_stat_vals(
  *
  * Returns zero on success; non-zero otherwise
  */
-int ecryptfs_new_file_context(struct inode *ecryptfs_inode)
+int ecryptfs_new_file_context(struct dentry *ecryptfs_dentry)
 {
 	struct ecryptfs_crypt_stat *crypt_stat =
-	    &ecryptfs_inode_to_private(ecryptfs_inode)->crypt_stat;
+	    &ecryptfs_inode_to_private(ecryptfs_dentry->d_inode)->crypt_stat;
 	struct ecryptfs_mount_crypt_stat *mount_crypt_stat =
 	    &ecryptfs_superblock_to_private(
-		    ecryptfs_inode->i_sb)->mount_crypt_stat;
+		    ecryptfs_dentry->d_sb)->mount_crypt_stat;
 	int cipher_name_len;
 	int rc = 0;
 
@@ -1239,11 +1057,8 @@ static int ecryptfs_process_flags(struct ecryptfs_crypt_stat *crypt_stat,
 static void write_ecryptfs_marker(char *page_virt, size_t *written)
 {
 	u32 m_1, m_2;
-#ifdef CONFIG_CRYPTO_FIPS
-	crypto_cc_rng_get_bytes((unsigned char*)&m_1, (MAGIC_ECRYPTFS_MARKER_SIZE_BYTES / 2));
-#else
+
 	get_random_bytes(&m_1, (MAGIC_ECRYPTFS_MARKER_SIZE_BYTES / 2));
-#endif
 	m_2 = (m_1 ^ MAGIC_ECRYPTFS_MARKER);
 	put_unaligned_be32(m_1, page_virt);
 	page_virt += (MAGIC_ECRYPTFS_MARKER_SIZE_BYTES / 2);
@@ -1445,12 +1260,12 @@ static int ecryptfs_write_headers_virt(char *page_virt, size_t max,
 }
 
 static int
-ecryptfs_write_metadata_to_contents(struct inode *ecryptfs_inode,
+ecryptfs_write_metadata_to_contents(struct dentry *ecryptfs_dentry,
 				    char *virt, size_t virt_len)
 {
 	int rc;
 
-	rc = ecryptfs_write_lower(ecryptfs_inode, virt,
+	rc = ecryptfs_write_lower(ecryptfs_dentry->d_inode, virt,
 				  0, virt_len);
 	if (rc < 0)
 		printk(KERN_ERR "%s: Error attempting to write header "
@@ -1484,8 +1299,7 @@ static unsigned long ecryptfs_get_zeroed_pages(gfp_t gfp_mask,
 
 /**
  * ecryptfs_write_metadata
- * @ecryptfs_dentry: The eCryptfs dentry, which should be negative
- * @ecryptfs_inode: The newly created eCryptfs inode
+ * @ecryptfs_dentry: The eCryptfs dentry
  *
  * Write the file headers out.  This will likely involve a userspace
  * callout, in which the session key is encrypted with one or more
@@ -1495,11 +1309,10 @@ static unsigned long ecryptfs_get_zeroed_pages(gfp_t gfp_mask,
  *
  * Returns zero on success; non-zero on error
  */
-int ecryptfs_write_metadata(struct dentry *ecryptfs_dentry,
-			    struct inode *ecryptfs_inode)
+int ecryptfs_write_metadata(struct dentry *ecryptfs_dentry)
 {
 	struct ecryptfs_crypt_stat *crypt_stat =
-		&ecryptfs_inode_to_private(ecryptfs_inode)->crypt_stat;
+		&ecryptfs_inode_to_private(ecryptfs_dentry->d_inode)->crypt_stat;
 	unsigned int order;
 	char *virt;
 	size_t virt_len;
@@ -1539,7 +1352,7 @@ int ecryptfs_write_metadata(struct dentry *ecryptfs_dentry,
 		rc = ecryptfs_write_metadata_to_xattr(ecryptfs_dentry, virt,
 						      size);
 	else
-		rc = ecryptfs_write_metadata_to_contents(ecryptfs_inode, virt,
+		rc = ecryptfs_write_metadata_to_contents(ecryptfs_dentry, virt,
 							 virt_len);
 	if (rc) {
 		printk(KERN_ERR "%s: Error writing metadata out to lower file; "
@@ -1736,8 +1549,8 @@ int ecryptfs_read_and_validate_xattr_region(struct dentry *dentry,
  */
 int ecryptfs_read_metadata(struct dentry *ecryptfs_dentry)
 {
-	int rc;
-	char *page_virt;
+	int rc = 0;
+	char *page_virt = NULL;
 	struct inode *ecryptfs_inode = ecryptfs_dentry->d_inode;
 	struct ecryptfs_crypt_stat *crypt_stat =
 	    &ecryptfs_inode_to_private(ecryptfs_inode)->crypt_stat;
@@ -1762,7 +1575,6 @@ int ecryptfs_read_metadata(struct dentry *ecryptfs_dentry)
 						ecryptfs_dentry,
 						ECRYPTFS_VALIDATE_HEADER_SIZE);
 	if (rc) {
-		/* metadata is not in the file header, so try xattrs */
 		memset(page_virt, 0, PAGE_CACHE_SIZE);
 		rc = ecryptfs_read_xattr_region(page_virt, ecryptfs_inode);
 		if (rc) {
@@ -1919,14 +1731,7 @@ ecryptfs_process_key_cipher(struct crypto_blkcipher **key_tfm,
 		      "allowable is [%d]\n", *key_size, ECRYPTFS_MAX_KEY_BYTES);
 		goto out;
 	}
-
-#ifdef CONFIG_CRYPTO_FIPS
-	if (cc_mode)
-		rc = ecryptfs_crypto_api_algify_cipher_name(&full_alg_name, cipher_name,
-						    "cbc");
-	else
-#endif
-		rc = ecryptfs_crypto_api_algify_cipher_name(&full_alg_name, cipher_name,
+	rc = ecryptfs_crypto_api_algify_cipher_name(&full_alg_name, cipher_name,
 						    "ecb");
 	if (rc)
 		goto out;
@@ -1943,11 +1748,7 @@ ecryptfs_process_key_cipher(struct crypto_blkcipher **key_tfm,
 
 		*key_size = alg->max_keysize;
 	}
-#ifdef CONFIG_CRYPTO_FIPS
-	crypto_cc_rng_get_bytes(dummy_key, *key_size);
-#else
 	get_random_bytes(dummy_key, *key_size);
-#endif
 	rc = crypto_blkcipher_setkey(*key_tfm, dummy_key, *key_size);
 	if (rc) {
 		printk(KERN_ERR "Error attempting to set key of size [%zd] for "
@@ -2187,17 +1988,6 @@ out:
 	return;
 }
 
-static size_t ecryptfs_max_decoded_size(size_t encoded_size)
-{
-	/* Not exact; conservatively long. Every block of 4
-	 * encoded characters decodes into a block of 3
-	 * decoded characters. This segment of code provides
-	 * the caller with the maximum amount of allocated
-	 * space that @dst will need to point to in a
-	 * subsequent call. */
-	return ((encoded_size + 1) * 3) / 4;
-}
-
 /**
  * ecryptfs_decode_from_filename
  * @dst: If NULL, this function only sets @dst_size and returns. If
@@ -2216,7 +2006,13 @@ ecryptfs_decode_from_filename(unsigned char *dst, size_t *dst_size,
 	size_t dst_byte_offset = 0;
 
 	if (dst == NULL) {
-		(*dst_size) = ecryptfs_max_decoded_size(src_size);
+		/* Not exact; conservatively long. Every block of 4
+		 * encoded characters decodes into a block of 3
+		 * decoded characters. This segment of code provides
+		 * the caller with the maximum amount of allocated
+		 * space that @dst will need to point to in a
+		 * subsequent call. */
+		(*dst_size) = (((src_size + 1) * 3) / 4);
 		goto out;
 	}
 	while (src_byte_offset < src_size) {
@@ -2441,53 +2237,3 @@ out_free:
 out:
 	return rc;
 }
-
-#define ENC_NAME_MAX_BLOCKLEN_8_OR_16	143
-
-int ecryptfs_set_f_namelen(long *namelen, long lower_namelen,
-			   struct ecryptfs_mount_crypt_stat *mount_crypt_stat)
-{
-	struct blkcipher_desc desc;
-	struct mutex *tfm_mutex;
-	size_t cipher_blocksize;
-	int rc;
-
-	if (!(mount_crypt_stat->flags & ECRYPTFS_GLOBAL_ENCRYPT_FILENAMES)) {
-		(*namelen) = lower_namelen;
-		return 0;
-	}
-
-	rc = ecryptfs_get_tfm_and_mutex_for_cipher_name(&desc.tfm, &tfm_mutex,
-			mount_crypt_stat->global_default_fn_cipher_name);
-	if (unlikely(rc)) {
-		(*namelen) = 0;
-		return rc;
-	}
-
-	mutex_lock(tfm_mutex);
-	cipher_blocksize = crypto_blkcipher_blocksize(desc.tfm);
-	mutex_unlock(tfm_mutex);
-
-	/* Return an exact amount for the common cases */
-	if (lower_namelen == NAME_MAX
-	    && (cipher_blocksize == 8 || cipher_blocksize == 16)) {
-		(*namelen) = ENC_NAME_MAX_BLOCKLEN_8_OR_16;
-		return 0;
-	}
-
-	/* Return a safe estimate for the uncommon cases */
-	(*namelen) = lower_namelen;
-	(*namelen) -= ECRYPTFS_FNEK_ENCRYPTED_FILENAME_PREFIX_SIZE;
-	/* Since this is the max decoded size, subtract 1 "decoded block" len */
-	(*namelen) = ecryptfs_max_decoded_size(*namelen) - 3;
-	(*namelen) -= ECRYPTFS_TAG_70_MAX_METADATA_SIZE;
-	(*namelen) -= ECRYPTFS_FILENAME_MIN_RANDOM_PREPEND_BYTES;
-	/* Worst case is that the filename is padded nearly a full block size */
-	(*namelen) -= cipher_blocksize - 1;
-
-	if ((*namelen) < 0)
-		(*namelen) = 0;
-
-	return 0;
-}
-

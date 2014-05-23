@@ -18,7 +18,6 @@
 #include <asm/cacheflush.h>
 #include <asm/cachetype.h>
 #include <asm/proc-fns.h>
-#include <asm-generic/mm_hooks.h>
 
 void __check_kvm_seq(struct mm_struct *mm);
 
@@ -41,10 +40,6 @@ void __check_kvm_seq(struct mm_struct *mm);
 #define ASID_BITS		8
 #define ASID_MASK		((~0) << ASID_BITS)
 #define ASID_FIRST_VERSION	(1 << ASID_BITS)
-
-#ifdef CONFIG_TIMA_RKP_DEBUG
-extern unsigned long tima_debug_infra_cnt;
-#endif
 
 extern unsigned int cpu_last_asid;
 #ifdef CONFIG_SMP
@@ -109,24 +104,10 @@ enter_lazy_tlb(struct mm_struct *mm, struct task_struct *tsk)
  * calling the CPU specific function when the mm hasn't
  * actually changed.
  */
-#ifdef	CONFIG_TIMA_RKP
-extern unsigned long tima_switch_count;
-extern spinlock_t tima_switch_count_lock;
-#endif
 static inline void
 switch_mm(struct mm_struct *prev, struct mm_struct *next,
 	  struct task_struct *tsk)
 {
-	
-#ifdef	CONFIG_TIMA_RKP
-	unsigned long flags;
-#endif
-#ifdef CONFIG_TIMA_RKP_DEBUG
-	int i;
-	unsigned long pmd;
-	unsigned long va;
-	int ret;
-#endif 
 #ifdef CONFIG_MMU
 	unsigned int cpu = smp_processor_id();
 
@@ -143,44 +124,6 @@ switch_mm(struct mm_struct *prev, struct mm_struct *next,
 #endif
 		check_context(next);
 		cpu_switch_mm(next->pgd, next);
-#ifdef	CONFIG_TIMA_RKP
-		spin_lock_irqsave(&tima_switch_count_lock, flags);
-		tima_switch_count++;
-		spin_unlock_irqrestore(&tima_switch_count_lock, flags);
-#endif
-	#ifdef CONFIG_TIMA_RKP_DEBUG
-		/* 
-		 * if debug infrastructure is enabled,
-		 * check is L1 and L2 page tables of a 
-		 * process are protected (readonly) at 
-		 * each context switch
-		 */
-		#ifdef CONFIG_TIMA_RKP_L1_TABLES
-		for (i=0; i<4; i++) {
-			if (tima_debug_page_protection(((unsigned long)next->pgd + i*0x1000), 1, 1) == 0) {
-				tima_debug_signal_failure(0x3f80f221, 1);
-				//tima_send_cmd((unsigned long)next->pgd, 0x3f80e221);
-				//printk(KERN_ERR"TIMA: New L1 PGT not protected\n");
-			}
-		}
-		#endif
-		#ifdef CONFIG_TIMA_RKP_L2_TABLES
-		for (i=0; i<0x1000; i++) {
-			pmd = *(unsigned long *)((unsigned long)next->pgd + i*4);
-			if ((pmd & 0x3) != 0x1)
-				continue;
-			if((0x07e00000 <= pmd) && (pmd <= 0x07f00000)) /* skip sect to pgt region */
-			       continue;	
-			va = (unsigned long)phys_to_virt(pmd & (~0x3ff)) ;
-			if ((ret = tima_debug_page_protection(va, 0x101, 1)) == 0) {
-				tima_debug_signal_failure(0x3f80f221, 101);
-				//printk(KERN_ERR"TIMA: New L2 PGT not RO va=%lx pa=%lx tima_debug_infra_cnt=%lx ret=%d\n", va, pmd, tima_debug_infra_cnt, ret);
-			} else if (ret == 1) {
-				tima_debug_infra_cnt++;
-			}
-		}
-		#endif /* CONFIG_TIMA_RKP_L2_TABLES */
-	#endif /* CONFIG_TIMA_RKP_DEBUG */
 		if (cache_is_vivt())
 			cpumask_clear_cpu(cpu, mm_cpumask(prev));
 	}
@@ -189,5 +132,33 @@ switch_mm(struct mm_struct *prev, struct mm_struct *next,
 
 #define deactivate_mm(tsk,mm)	do { } while (0)
 #define activate_mm(prev,next)	switch_mm(prev, next, NULL)
+
+/*
+ * We are inserting a "fake" vma for the user-accessible vector page so
+ * gdb and friends can get to it through ptrace and /proc/<pid>/mem.
+ * But we also want to remove it before the generic code gets to see it
+ * during process exit or the unmapping of it would  cause total havoc.
+ * (the macro is used as remove_vma() is static to mm/mmap.c)
+ */
+#define arch_exit_mmap(mm) \
+do { \
+	struct vm_area_struct *high_vma = find_vma(mm, 0xffff0000); \
+	if (high_vma) { \
+		BUG_ON(high_vma->vm_next);  /* it should be last */ \
+		if (high_vma->vm_prev) \
+			high_vma->vm_prev->vm_next = NULL; \
+		else \
+			mm->mmap = NULL; \
+		rb_erase(&high_vma->vm_rb, &mm->mm_rb); \
+		mm->mmap_cache = NULL; \
+		mm->map_count--; \
+		remove_vma(high_vma); \
+	} \
+} while (0)
+
+static inline void arch_dup_mmap(struct mm_struct *oldmm,
+				 struct mm_struct *mm)
+{
+}
 
 #endif

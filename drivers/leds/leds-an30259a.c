@@ -3,7 +3,7 @@
  *
  * Copyright (C) 2012, Samsung Electronics Co. Ltd. All Rights Reserved.
  *
- * Contact: Kamaldeep Singla <kamal.singla@samsung.com>
+ * Contact: Haeil Hyun <haeil.hyun@samsung.com>
  *
  *
  * This program is free software; you can redistribute it and/or modify
@@ -24,7 +24,6 @@
 #include <linux/leds-an30259a.h>
 #include <linux/workqueue.h>
 #include <linux/wakelock.h>
-#include <linux/gpio.h>
 
 /* AN30259A register map */
 #define AN30259A_REG_SRESET		0x00
@@ -83,7 +82,7 @@
 
 #define	MAX_NUM_LEDS	3
 
-u8 LED_DYNAMIC_CURRENT = 0x28;
+u8 LED_DYNAMIC_CURRENT = 0x8;
 u8 LED_LOWPOWER_MODE = 0x0;
 
 static struct an30259_led_conf led_conf[] = {
@@ -143,6 +142,7 @@ struct i2c_client *b_client;
 #define LED_DEEP_DEBUG
 
 #ifdef SEC_LED_SPECIFIC
+extern struct class *sec_class;
 struct device *led_dev;
 /*path : /sys/class/sec/led/led_pattern*/
 /*path : /sys/class/sec/led/led_blink*/
@@ -332,53 +332,47 @@ static void an30259a_start_led_pattern(int mode)
 
 	/* Set to low power consumption mode */
 	if (LED_LOWPOWER_MODE == 1)
-		LED_DYNAMIC_CURRENT = 0x05;
+		LED_DYNAMIC_CURRENT = 0x8;
 	else
-		LED_DYNAMIC_CURRENT = 0x28;
+		LED_DYNAMIC_CURRENT = 0x1;
 
 	switch (mode) {
 	/* leds_set_slope_mode(client, LED_SEL, DELAY,  MAX, MID, MIN,
 		SLPTT1, SLPTT2, DT1, DT2, DT3, DT4) */
 	case CHARGING:
-		pr_info("LED Battery Charging Pattern on\n");
 		leds_on(LED_R, true, false,
-					LED_DYNAMIC_CURRENT);
+					LED_R_CURRENT / LED_DYNAMIC_CURRENT);
 		break;
 
 	case CHARGING_ERR:
-		pr_info("LED Battery Charging error Pattern on\n");
 		leds_on(LED_R, true, true,
-					LED_DYNAMIC_CURRENT);
+					LED_R_CURRENT / LED_DYNAMIC_CURRENT);
 		leds_set_slope_mode(client, LED_R,
 				1, 15, 15, 0, 1, 1, 0, 0, 0, 0);
 		break;
 
 	case MISSED_NOTI:
-		pr_info("LED Missed Notifications Pattern on\n");
 		leds_on(LED_B, true, true,
-					LED_DYNAMIC_CURRENT);
+					LED_B_CURRENT / LED_DYNAMIC_CURRENT);
 		leds_set_slope_mode(client, LED_B,
 					10, 15, 15, 0, 1, 10, 0, 0, 0, 0);
 		break;
 
 	case LOW_BATTERY:
-		pr_info("LED Low Battery Pattern on\n");
 		leds_on(LED_R, true, true,
-					LED_DYNAMIC_CURRENT);
+					LED_R_CURRENT / LED_DYNAMIC_CURRENT);
 		leds_set_slope_mode(client, LED_R,
 					10, 15, 15, 0, 1, 10, 0, 0, 0, 0);
 		break;
 
 	case FULLY_CHARGED:
-		pr_info("LED full Charged battery Pattern on\n");
 		leds_on(LED_G, true, false,
-					LED_DYNAMIC_CURRENT);
+					LED_G_CURRENT / LED_DYNAMIC_CURRENT);
 		break;
 
 	case POWERING:
-		pr_info("LED Powering Pattern on\n");
-		leds_on(LED_G, true, true, LED_DYNAMIC_CURRENT);
-		leds_on(LED_B, true, true, LED_DYNAMIC_CURRENT);
+		leds_on(LED_G, true, true, LED_G_CURRENT);
+		leds_on(LED_B, true, true, LED_B_CURRENT);
 		leds_set_slope_mode(client, LED_G,
 				0, 8, 4, 1, 2, 2, 3, 3, 3, 3);
 		leds_set_slope_mode(client, LED_B,
@@ -473,7 +467,7 @@ static ssize_t store_an30259a_led_br_lev(struct device *dev,
 	struct an30259a_data *data = dev_get_drvdata(dev);
 	client = b_client;
 
-	retval = kstrtoul(buf, 16, &brightness_lev);
+	retval = strict_strtoul(buf, 16, &brightness_lev);
 	if (retval != 0) {
 		dev_err(&data->client->dev, "fail to get led_br_lev.\n");
 		return count;
@@ -651,7 +645,7 @@ static ssize_t led_delay_on_show(struct device *dev,
 	struct led_classdev *led_cdev = dev_get_drvdata(dev);
 	struct an30259a_led *led = cdev_to_led(led_cdev);
 
-	return snprintf(buf, 10, "%lu\n", led->delay_on_time_ms);
+	return sprintf(buf, "%lu\n", led->delay_on_time_ms);
 }
 
 static ssize_t led_delay_on_store(struct device *dev,
@@ -662,7 +656,7 @@ static ssize_t led_delay_on_store(struct device *dev,
 	struct an30259a_led *led = cdev_to_led(led_cdev);
 	unsigned long time;
 
-	if (kstrtoul(buf, 0, &time))
+	if (strict_strtoul(buf, 0, &time))
 		return -EINVAL;
 
 	led->delay_on_time_ms = (int)time;
@@ -675,7 +669,7 @@ static ssize_t led_delay_off_show(struct device *dev,
 	struct led_classdev *led_cdev = dev_get_drvdata(dev);
 	struct an30259a_led *led = cdev_to_led(led_cdev);
 
-	return snprintf(buf, 10, "%lu\n", led->delay_off_time_ms);
+	return sprintf(buf, "%lu\n", led->delay_off_time_ms);
 }
 
 static ssize_t led_delay_off_store(struct device *dev,
@@ -686,7 +680,7 @@ static ssize_t led_delay_off_store(struct device *dev,
 	struct an30259a_led *led = cdev_to_led(led_cdev);
 	unsigned long time;
 
-	if (kstrtoul(buf, 0, &time))
+	if (strict_strtoul(buf, 0, &time))
 		return -EINVAL;
 
 	led->delay_off_time_ms = (int)time;
@@ -702,7 +696,7 @@ static ssize_t led_blink_store(struct device *dev,
 	struct an30259a_led *led = cdev_to_led(led_cdev);
 	unsigned long blink_set;
 
-	if (kstrtoul(buf, 0, &blink_set))
+	if (strict_strtoul(buf, 0, &blink_set))
 		return -EINVAL;
 
 	if (!blink_set) {
@@ -819,18 +813,19 @@ static int __devinit an30259a_initialize(struct i2c_client *client,
 	return 0;
 }
 
+
 static int __devinit an30259a_probe(struct i2c_client *client,
 	const struct i2c_device_id *id)
 {
 	struct an30259a_data *data;
 	int ret, i;
 
-	dev_err(&client->adapter->dev, "%s\n", __func__);
+	dev_dbg(&client->adapter->dev, "%s\n", __func__);
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C)) {
 		dev_err(&client->dev, "need I2C_FUNC_I2C.\n");
 		return -ENODEV;
 	}
- 
+
 	data = kzalloc(sizeof(*data), GFP_KERNEL);
 	if (!data) {
 		dev_err(&client->adapter->dev,
@@ -862,21 +857,19 @@ static int __devinit an30259a_probe(struct i2c_client *client,
 		dev_err(&client->dev,
 			"Failed to create device for samsung specific led\n");
 		ret = -ENODEV;
-		goto exit1;
+		goto exit;
 	}
 	ret = sysfs_create_group(&led_dev->kobj, &sec_led_attr_group);
 	if (ret) {
 		dev_err(&client->dev,
 			"Failed to create sysfs group for samsung specific led\n");
-		goto exit;
+		goto exit2;
 	}
 #endif
 	return ret;
 
-#ifdef SEC_LED_SPECIFIC
-exit1:
-   device_destroy(sec_class, 0);
-#endif
+exit2: 
+	device_destroy(sec_class, 0);
 exit:
 	mutex_destroy(&data->mutex);
 	kfree(data);
@@ -909,16 +902,10 @@ static struct i2c_device_id an30259a_id[] = {
 
 MODULE_DEVICE_TABLE(i2c, an30259a_id);
 
-static struct of_device_id an30259a_match_table[] = {
-	{ .compatible = "an30259a,led",},
-	{ },
-};
-
 static struct i2c_driver an30259a_i2c_driver = {
 	.driver = {
 		.owner	= THIS_MODULE,
 		.name	= "an30259a",
-		.of_match_table = an30259a_match_table,
 	},
 	.id_table = an30259a_id,
 	.probe = an30259a_probe,
@@ -939,5 +926,5 @@ module_init(an30259a_init);
 module_exit(an30259a_exit);
 
 MODULE_DESCRIPTION("AN30259A LED driver");
-MODULE_AUTHOR("Kamaldeep Singla <kamal.singla@samsung.com");
+MODULE_AUTHOR("Haeil Hyun <haeil.hyun@samsung.com");
 MODULE_LICENSE("GPL v2");

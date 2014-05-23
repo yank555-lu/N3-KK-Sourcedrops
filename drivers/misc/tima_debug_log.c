@@ -9,10 +9,15 @@
 #include <linux/io.h>
 #include <linux/types.h>
 
-#ifdef CONFIG_ARCH_MSM8974PRO
-#define	DEBUG_LOG_START	(0x07100000)
-#elif CONFIG_ARCH_MSM8974
-#define DEBUG_LOG_START (0x07300000)
+#define	SECURE_LOG	0
+#define	DEBUG_LOG	1
+
+#if defined(CONFIG_MACH_M0) // for M0 1 GB RAM
+#define	DEBUG_LOG_START		(0x46102000)
+#define	SECURE_LOG_START	(0x46202000)
+#else			   // for M3 and T0 2GB RAM
+#define	DEBUG_LOG_START		(0x46202000) 
+#define	SECURE_LOG_START	(0x46302000)
 #endif
 
 #define	DEBUG_LOG_SIZE	(1<<20)
@@ -38,26 +43,48 @@ typedef struct debug_log_header_s
 #define DRIVER_DESC   "A kernel module to read tima debug log"
 
 unsigned long *tima_debug_log_addr = 0;
+unsigned long *tima_secure_log_addr = 0;
 
-ssize_t	tima_read(struct file *filep, char __user *buf, size_t size, loff_t *offset)
+/**
+ *      tima_proc_show - Handler for writing TIMA Log into sequential Buffer
+ */
+static int tima_proc_debug_show(struct seq_file *m, void *v)
 {
-	/* First check is to get rid of integer overflow exploits */
-	if (size > DEBUG_LOG_SIZE || (*offset) + size > DEBUG_LOG_SIZE) {
-		printk(KERN_ERR"Extra read\n");
-		return -EINVAL;
-	}
+	/* Pass on the whole debug buffer to the user-space. User-space
+	 * will interpret it as it chooses to.
+	 */
+	seq_write(m, (const char *)tima_debug_log_addr, DEBUG_LOG_SIZE);
 
-	if (copy_to_user(buf, (const char *)tima_debug_log_addr + (*offset), size)) {
-		printk(KERN_ERR"Copy to user failed\n");
-		return -1;
-	} else {
-		*offset += size;
-		return size;
-	}
+	return 0;
 }
 
+static int tima_proc_secure_show(struct seq_file *m, void *v)
+{
+	/* Pass on the whole debug buffer to the user-space. User-space
+	 * will interpret it as it chooses to.
+	 */
+	seq_write(m, (const char *)tima_secure_log_addr, DEBUG_LOG_SIZE);
+
+	return 0;
+}
+
+/**
+ *      tima_proc_open - Handler for opening sequential file interface for proc file system 
+ */
+static int tima_proc_open(struct inode *inode, struct file *filp)
+{
+	if (!strcmp(filp->f_path.dentry->d_iname, "tima_secure_log"))
+		return single_open(filp, tima_proc_secure_show, NULL);
+	else
+		return single_open(filp, tima_proc_debug_show, NULL);
+}
+
+
 static const struct file_operations tima_proc_fops = {
-	.read		= tima_read,
+	.open		= tima_proc_open,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= single_release,
 };
 
 /**
@@ -71,17 +98,19 @@ static int __init tima_debug_log_read_init(void)
 		printk(KERN_ERR"tima_debug_log_read_init: Error creating proc entry\n");
 		goto error_return;
 	}
+
+        if (proc_create("tima_secure_log", 0644,NULL, &tima_proc_fops) == NULL) {
+		printk(KERN_ERR"tima_secure_log_read_init: Error creating proc entry\n");
+		goto remove_debug_entry;
+	}
         printk(KERN_INFO"tima_debug_log_read_init: Registering /proc/tima_debug_log Interface \n");
 
-	tima_debug_log_addr = (unsigned long *)ioremap(DEBUG_LOG_START, DEBUG_LOG_SIZE);
-	if (tima_debug_log_addr == NULL) {
-		printk(KERN_ERR"tima_debug_log_read_init: ioremap Failed\n");
-		goto ioremap_failed;
-	}
+	tima_debug_log_addr = (unsigned long *)phys_to_virt(DEBUG_LOG_START);
+	tima_secure_log_addr = (unsigned long *)phys_to_virt(SECURE_LOG_START);
         return 0;
 
-ioremap_failed:
-	remove_proc_entry("tima_debug_log", NULL);
+remove_debug_entry:
+        remove_proc_entry("tima_debug_log", NULL);
 error_return:
 	return -1;
 }
@@ -95,10 +124,8 @@ error_return:
 static void __exit tima_debug_log_read_exit(void)
 {
         remove_proc_entry("tima_debug_log", NULL);
+        remove_proc_entry("tima_secure_log", NULL);
         printk(KERN_INFO"Deregistering /proc/tima_debug_log Interface\n");
-
-	if(tima_debug_log_addr != NULL)
-		iounmap(tima_debug_log_addr);
 }
 
 

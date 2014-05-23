@@ -24,7 +24,7 @@
 #include <linux/poll.h>
 #include <linux/usb/cdc.h>
 
-static void acm_notify(void *dev, u16 state);
+static int acm_notify(void *dev, u16 state);
 
 
 static wait_queue_head_t modem_wait_q;
@@ -93,12 +93,14 @@ EXPORT_SYMBOL(notify_control_line_state);
 static long
 modem_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
+	int ret = 0;
+	printk(KERN_INFO "modem_ioctl: cmd=0x%x, arg=%lu\n", cmd, arg);
 
 	/* handle ioctls */
 	switch (cmd) {
 	case GS_CDC_NOTIFY_SERIAL_STATE:
-		acm_notify(acm_data, __constant_cpu_to_le16(arg));
-		break;
+		ret = acm_notify(acm_data, __constant_cpu_to_le16(arg));
+		return ret;
 
 	case GS_IOC_NOTIFY_DTR_TEST:
 		{
@@ -127,7 +129,7 @@ static const struct file_operations modem_fops = {
 };
 
 static struct miscdevice modem_device = {
-	.minor	= 123,
+	.minor = MISC_DYNAMIC_MINOR,
 	.name	= "dun",
 	.fops	= &modem_fops,
 };
@@ -141,6 +143,8 @@ int modem_register(void *data)
 
 	acm_data = data;
 
+	init_waitqueue_head(&modem_wait_q);
+
 	printk(KERN_INFO "DUN is registerd\n");
 
 	return 0;
@@ -151,23 +155,16 @@ static int modem_misc_register(void)
 {
 	int ret;
 	ret = misc_register(&modem_device);
-
 	if (ret) {
 		printk(KERN_ERR "DUN register is failed, ret = %d\n", ret);
 		return ret;
 	}
-
-	init_waitqueue_head(&modem_wait_q);
 	return ret;
 }
 
 void modem_unregister(void)
 {
 	acm_data = NULL;
-
-	read_state = 1;
-
-	wake_up_interruptible(&modem_wait_q);
 
 	printk(KERN_INFO "DUN is unregisterd\n");
 }

@@ -55,6 +55,7 @@ struct usb_mtp_ctrlrequest {
 	struct usb_ctrlrequest	setup;
 };
 
+
 struct usb_container_header {
 	uint32_t  Length;/* the valid size, in BYTES, of the container  */
 	uint16_t   Type;/* Container type */
@@ -68,5 +69,6 @@ struct read_send_info {
 	uint16_t Code;/* Operation code, response code, or Event code */
 	uint32_t TransactionID;/* host generated number */
 };
+
 
 #endif /* __F_MTP_H */

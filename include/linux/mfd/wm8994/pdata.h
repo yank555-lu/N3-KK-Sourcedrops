@@ -22,13 +22,14 @@ struct wm8994_ldo_pdata {
 	/** GPIOs to enable regulator, 0 or less if not available */
 	int enable;
 
-	const struct regulator_init_data *init_data;
+	const char *supply;
+	struct regulator_init_data *init_data;
 };
 
 #define WM8994_CONFIGURE_GPIO 0x10000
 
 #define WM8994_DRC_REGS 5
-#define WM8994_EQ_REGS  20
+#define WM8994_EQ_REGS  21
 #define WM8958_MBC_CUTOFF_REGS 20
 #define WM8958_MBC_COEFF_REGS  48
 #define WM8958_MBC_COMBINED_REGS 56
@@ -199,6 +200,11 @@ struct wm8994_pdata {
 	 * consumption will rise.
 	 */
 	bool ldo_ena_always_driven;
+
+	/*
+	 * LDO enable delay time
+	 */
+	int ldo_ena_delay;
 
 	/*
 	 * SPKMODE must be pulled internally by the device on this

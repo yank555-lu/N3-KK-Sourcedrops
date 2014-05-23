@@ -18,6 +18,20 @@
 #define	CHIP_ID		"CM36651"
 
 #define CANCELATION_FILE_PATH	"/efs/prox_cal"
+#define LCD_LDI_FILE_PATH	"/sys/class/lcd/panel/window_type"
+
+#define LINE_1		'4'
+#define LINE_2		'2'
+
+#define LDI_OTHERS	'0'
+#define LDI_GRAY	'1'
+#define LDI_WHITE	'2'
+
+#define CANCELATION_THRESHOLD		9
+#define DEFAULT_THRESHOLD		13
+#define OTHERS_OCTA_DEFAULT_THRESHOLD	14
+#define WHITE_OCTA_DEFAULT_THRESHOLD	13
+#define GRAY_OCTA_DEFAULT_THRESHOLD	12
 
 /*************************************************************************/
 /* factory Sysfs                                                         */
@@ -54,7 +68,7 @@ static ssize_t proximity_avg_store(struct device *dev,
 	int64_t dEnable;
 	struct ssp_data *data = dev_get_drvdata(dev);
 
-	iRet = strict_strtoll(buf, 10, &dEnable);
+	iRet = kstrtoll(buf, 10, &dEnable);
 	if (iRet < 0)
 		return iRet;
 
@@ -82,7 +96,6 @@ static unsigned char get_proximity_rawdata(struct ssp_data *data)
 		send_instruction(data, REMOVE_SENSOR, PROXIMITY_RAW,
 			chTempbuf, 2);
 	} else {
-
 		uRowdata = data->buf[PROXIMITY_RAW].prox[0];
 	}
 
@@ -95,6 +108,63 @@ static ssize_t proximity_state_show(struct device *dev,
 	struct ssp_data *data = dev_get_drvdata(dev);
 
 	return sprintf(buf, "%u\n", get_proximity_rawdata(data));
+}
+
+static void change_proximity_default_threshold(struct ssp_data *data)
+{
+	switch (data->chLcdLdi[1]) {
+	case LDI_GRAY:
+		data->uProxHiThresh = GRAY_OCTA_DEFAULT_THRESHOLD;
+		break;
+	case LDI_WHITE:
+		data->uProxHiThresh = WHITE_OCTA_DEFAULT_THRESHOLD;
+		break;
+	case LDI_OTHERS:
+		data->uProxHiThresh = OTHERS_OCTA_DEFAULT_THRESHOLD;
+		break;
+	default:
+		data->uProxHiThresh = DEFAULT_THRESHOLD;
+		break;
+	}
+}
+
+int proximity_open_lcd_ldi(struct ssp_data *data)
+{
+	int iRet = 0;
+	mm_segment_t old_fs;
+	struct file *cancel_filp = NULL;
+
+	old_fs = get_fs();
+	set_fs(KERNEL_DS);
+
+	cancel_filp = filp_open(LCD_LDI_FILE_PATH, O_RDONLY, 0666);
+	if (IS_ERR(cancel_filp)) {
+		iRet = PTR_ERR(cancel_filp);
+		if (iRet != -ENOENT)
+			pr_err("[SSP]: %s - Can't open lcd ldi file\n",
+				__func__);
+		set_fs(old_fs);
+		data->chLcdLdi[0] = 0;
+		data->chLcdLdi[1] = 0;
+		goto exit;
+	}
+
+	iRet = cancel_filp->f_op->read(cancel_filp,
+		(u8 *)data->chLcdLdi, sizeof(u8) * 2, &cancel_filp->f_pos);
+	if (iRet != (sizeof(u8) * 2)) {
+		pr_err("[SSP]: %s - Can't read the lcd ldi data\n", __func__);
+		iRet = -EIO;
+	}
+
+	ssp_dbg("[SSP]: %s - %c%c\n", __func__,
+		data->chLcdLdi[0], data->chLcdLdi[1]);
+
+	filp_close(cancel_filp, current->files);
+	set_fs(old_fs);
+
+exit:
+	change_proximity_default_threshold(data);
+	return iRet;
 }
 
 int proximity_open_calibration(struct ssp_data *data)
@@ -123,17 +193,17 @@ int proximity_open_calibration(struct ssp_data *data)
 		iRet = -EIO;
 	}
 
-	if (data->uProxCanc != 0) /*If there is an offset cal data. */
-		data->uProxThresh = CANCELATION_THRESHOLD;
+	if (data->uProxCanc != 0) /* If there is an offset cal data. */
+		data->uProxHiThresh = CANCELATION_THRESHOLD;
 
 	pr_info("%s: proximity ps_canc = %d, ps_thresh = %d\n",
-		__func__, data->uProxCanc, data->uProxThresh);
+		__func__, data->uProxCanc, data->uProxHiThresh);
 
 	filp_close(cancel_filp, current->files);
 	set_fs(old_fs);
 
 exit:
-	set_proximity_threshold(data);
+	set_proximity_threshold(data, data->uProxHiThresh, data->uProxCanc);
 
 	return iRet;
 }
@@ -145,20 +215,20 @@ static int proximity_store_cancelation(struct ssp_data *data, int iCalCMD)
 	struct file *cancel_filp = NULL;
 
 	if (iCalCMD) {
-		data->uProxThresh = CANCELATION_THRESHOLD;
+		data->uProxHiThresh = CANCELATION_THRESHOLD;
 		data->uProxCanc = get_proximity_rawdata(data);
 	} else {
-		data->uProxThresh = DEFUALT_THRESHOLD;
+		change_proximity_default_threshold(data);
 		data->uProxCanc = 0;
 	}
 
-	set_proximity_threshold(data);
+	set_proximity_threshold(data, data->uProxHiThresh, data->uProxCanc);
 
 	old_fs = get_fs();
 	set_fs(KERNEL_DS);
 
 	cancel_filp = filp_open(CANCELATION_FILE_PATH,
-			O_CREAT | O_TRUNC | O_WRONLY, 0666);
+			O_CREAT | O_TRUNC | O_WRONLY | O_SYNC, 0666);
 	if (IS_ERR(cancel_filp)) {
 		pr_err("%s: Can't open cancelation file\n", __func__);
 		set_fs(old_fs);
@@ -185,9 +255,9 @@ static ssize_t proximity_cancel_show(struct device *dev,
 	struct ssp_data *data = dev_get_drvdata(dev);
 
 	ssp_dbg("[SSP]: uProxThresh = %u, uProxCanc = %u\n",
-		data->uProxThresh, data->uProxCanc);
+		data->uProxHiThresh, data->uProxCanc);
 
-	return sprintf(buf, "%u,%u\n", data->uProxCanc, data->uProxThresh);
+	return sprintf(buf, "%u,%u\n", data->uProxCanc, data->uProxHiThresh);
 }
 
 static ssize_t proximity_cancel_store(struct device *dev,
@@ -221,27 +291,27 @@ static ssize_t proximity_thresh_show(struct device *dev,
 {
 	struct ssp_data *data = dev_get_drvdata(dev);
 
-	ssp_dbg("[SSP]: uProxThresh = %u\n", data->uProxThresh);
+	ssp_dbg("[SSP]: uProxThresh = %u\n", data->uProxHiThresh);
 
-	return sprintf(buf, "%u\n", data->uProxThresh);
+	return sprintf(buf, "%u\n", data->uProxHiThresh);
 }
 
 static ssize_t proximity_thresh_store(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t size)
 {
-	struct ssp_data *data = dev_get_drvdata(dev);
 	u8 uNewThresh = 0x09;
 	int iRet = 0;
+	struct ssp_data *data = dev_get_drvdata(dev);
 
 	iRet = kstrtou8(buf, 10, &uNewThresh);
 	if (iRet < 0)
 		pr_err("[SSP]: %s - kstrtoint failed.", __func__);
 
-	data->uProxThresh = uNewThresh;
-	set_proximity_threshold(data);
+	data->uProxHiThresh = uNewThresh;
+	set_proximity_threshold(data, data->uProxHiThresh, data->uProxCanc);
 
 	ssp_dbg("[SSP]: %s - new prox threshold = 0x%x\n",
-		__func__, data->uProxThresh);
+		__func__, data->uProxHiThresh);
 
 	return size;
 }
@@ -261,7 +331,7 @@ static ssize_t barcode_emul_enable_store(struct device *dev,
 	int64_t dEnable;
 	struct ssp_data *data = dev_get_drvdata(dev);
 
-	iRet = strict_strtoll(buf, 10, &dEnable);
+	iRet = kstrtoll(buf, 10, &dEnable);
 	if (iRet < 0)
 		return iRet;
 
@@ -276,6 +346,7 @@ static ssize_t barcode_emul_enable_store(struct device *dev,
 static DEVICE_ATTR(vendor, S_IRUGO, prox_vendor_show, NULL);
 static DEVICE_ATTR(name, S_IRUGO, prox_name_show, NULL);
 static DEVICE_ATTR(state, S_IRUGO, proximity_state_show, NULL);
+static DEVICE_ATTR(raw_data, S_IRUGO, proximity_state_show, NULL);
 static DEVICE_ATTR(barcode_emul_en, S_IRUGO | S_IWUSR | S_IWGRP,
 	barcode_emul_enable_show, barcode_emul_enable_store);
 static DEVICE_ATTR(prox_avg, S_IRUGO | S_IWUSR | S_IWGRP,
@@ -289,6 +360,7 @@ static struct device_attribute *prox_attrs[] = {
 	&dev_attr_vendor,
 	&dev_attr_name,
 	&dev_attr_state,
+	&dev_attr_raw_data,
 	&dev_attr_prox_avg,
 	&dev_attr_prox_cal,
 	&dev_attr_prox_thresh,
@@ -298,7 +370,11 @@ static struct device_attribute *prox_attrs[] = {
 
 void initialize_prox_factorytest(struct ssp_data *data)
 {
-	struct device *prox_device = NULL;
+	sensors_register(data->prox_device, data,
+		prox_attrs, "proximity_sensor");
+}
 
-	sensors_register(prox_device, data, prox_attrs, "proximity_sensor");
+void remove_prox_factorytest(struct ssp_data *data)
+{
+	sensors_unregister(data->prox_device, prox_attrs);
 }

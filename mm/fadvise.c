@@ -90,6 +90,9 @@ SYSCALL_DEFINE(fadvise64_64)(int fd, loff_t offset, loff_t len, int advice)
 		file->f_ra.ra_pages = bdi->ra_pages * 2;
 		spin_lock(&file->f_lock);
 		file->f_mode &= ~FMODE_RANDOM;
+#ifdef CONFIG_FADV_NOACTIVE
+		file->f_mode |= FMODE_NOACTIVE;
+#endif
 		spin_unlock(&file->f_lock);
 		break;
 	case POSIX_FADV_WILLNEED:
@@ -117,8 +120,7 @@ SYSCALL_DEFINE(fadvise64_64)(int fd, loff_t offset, loff_t len, int advice)
 		break;
 	case POSIX_FADV_DONTNEED:
 		if (!bdi_write_congested(mapping->backing_dev_info))
-			__filemap_fdatawrite_range(mapping, offset, endbyte,
-						   WB_SYNC_NONE);
+			filemap_flush(mapping);
 
 		/* First and last FULL page! */
 		start_index = (offset+(PAGE_CACHE_SIZE-1)) >> PAGE_CACHE_SHIFT;

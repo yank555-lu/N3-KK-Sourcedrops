@@ -22,15 +22,13 @@
 
 /* Factory data length */
 #define ACCEL_FACTORY_DATA_LENGTH		1
-#define GYRO_FACTORY_DATA_LENGTH		36
-#define MAGNETIC_FACTORY_DATA_LENGTH		26
+#define GYRO_FACTORY_DATA_LENGTH		27
+#define MAGNETIC_FACTORY_DATA_LENGTH		6
 #define PRESSURE_FACTORY_DATA_LENGTH		1
 #define MCU_FACTORY_DATA_LENGTH			5
-#define	GYRO_TEMP_FACTORY_DATA_LENGTH		2
+#define	GYRO_TEMP_FACTORY_DATA_LENGTH		1
 #define	GYRO_DPS_FACTORY_DATA_LENGTH		1
-#define TEMPHUMIDITY_FACTORY_DATA_LENGTH	1
-#define MCU_SLEEP_FACTORY_DATA_LENGTH		FACTORY_DATA_MAX
-#define GESTURE_FACTORY_DATA_LENGTH     4
+#define MCU_SLEEP_FACTORY_DATA_LENGTH		39
 
 /*************************************************************************/
 /* SSP parsing the dataframe                                             */
@@ -44,17 +42,17 @@ static void get_3axis_sensordata(char *pchRcvDataFrame, int *iDataIdx,
 	iTemp = (int)pchRcvDataFrame[(*iDataIdx)++];
 	iTemp <<= 8;
 	iTemp += pchRcvDataFrame[(*iDataIdx)++];
-	sensorsdata->x = (s16)iTemp;
+	sensorsdata->x = iTemp;
 
 	iTemp = (int)pchRcvDataFrame[(*iDataIdx)++];
 	iTemp <<= 8;
 	iTemp += pchRcvDataFrame[(*iDataIdx)++];
-	sensorsdata->y = (s16)iTemp;
+	sensorsdata->y = iTemp;
 
 	iTemp = (int)pchRcvDataFrame[(*iDataIdx)++];
 	iTemp <<= 8;
 	iTemp += pchRcvDataFrame[(*iDataIdx)++];
-	sensorsdata->z = (s16)iTemp;
+	sensorsdata->z = iTemp;
 }
 
 static void get_light_sensordata(char *pchRcvDataFrame, int *iDataIdx,
@@ -65,22 +63,22 @@ static void get_light_sensordata(char *pchRcvDataFrame, int *iDataIdx,
 	iTemp = (int)pchRcvDataFrame[(*iDataIdx)++];
 	iTemp <<= 8;
 	iTemp += pchRcvDataFrame[(*iDataIdx)++];
-	sensorsdata->r = (u16)iTemp;
+	sensorsdata->r = iTemp;
 
 	iTemp = (int)pchRcvDataFrame[(*iDataIdx)++];
 	iTemp <<= 8;
 	iTemp += pchRcvDataFrame[(*iDataIdx)++];
-	sensorsdata->g = (u16)iTemp;
+	sensorsdata->g = iTemp;
 
 	iTemp = (int)pchRcvDataFrame[(*iDataIdx)++];
 	iTemp <<= 8;
 	iTemp += pchRcvDataFrame[(*iDataIdx)++];
-	sensorsdata->b = (u16)iTemp;
+	sensorsdata->b = iTemp;
 
 	iTemp = (int)pchRcvDataFrame[(*iDataIdx)++];
 	iTemp <<= 8;
 	iTemp += pchRcvDataFrame[(*iDataIdx)++];
-	sensorsdata->w = (u16)iTemp;
+	sensorsdata->w = iTemp;
 }
 
 static void get_pressure_sensordata(char *pchRcvDataFrame, int *iDataIdx,
@@ -109,13 +107,26 @@ static void get_gesture_sensordata(char *pchRcvDataFrame, int *iDataIdx,
 	struct sensor_value *sensorsdata)
 {
 	int iTemp;
-	int i = 0;
-	for (i=0; i<9; i++) {
-		iTemp = (int)pchRcvDataFrame[(*iDataIdx)++];
-		iTemp <<= 8;
-		iTemp += pchRcvDataFrame[(*iDataIdx)++];
-		sensorsdata->data[i] = (s16)iTemp;
-	}
+
+	iTemp = (int)pchRcvDataFrame[(*iDataIdx)++];
+	iTemp <<= 8;
+	iTemp += pchRcvDataFrame[(*iDataIdx)++];
+	sensorsdata->data[0] = iTemp;
+
+	iTemp = (int)pchRcvDataFrame[(*iDataIdx)++];
+	iTemp <<= 8;
+	iTemp += pchRcvDataFrame[(*iDataIdx)++];
+	sensorsdata->data[1] = iTemp;
+
+	iTemp = (int)pchRcvDataFrame[(*iDataIdx)++];
+	iTemp <<= 8;
+	iTemp += pchRcvDataFrame[(*iDataIdx)++];
+	sensorsdata->data[2] = iTemp;
+
+	iTemp = (int)pchRcvDataFrame[(*iDataIdx)++];
+	iTemp <<= 8;
+	iTemp += pchRcvDataFrame[(*iDataIdx)++];
+	sensorsdata->data[3] = iTemp;
 }
 
 static void get_proximity_sensordata(char *pchRcvDataFrame, int *iDataIdx,
@@ -131,29 +142,7 @@ static void get_proximity_rawdata(char *pchRcvDataFrame, int *iDataIdx,
 	sensorsdata->prox[0] = (u8)pchRcvDataFrame[(*iDataIdx)++];
 }
 
-static void get_geomagnetic_rawdata(char *pchRcvDataFrame, int *iDataIdx,
-	struct sensor_value *sensorsdata)
-{
-	int iTemp;
-
-	iTemp = (int)pchRcvDataFrame[(*iDataIdx)++];
-	iTemp <<= 8;
-	iTemp += pchRcvDataFrame[(*iDataIdx)++];
-	sensorsdata->x = (s16)iTemp;
-
-	iTemp = (int)pchRcvDataFrame[(*iDataIdx)++];
-	iTemp <<= 8;
-	iTemp += pchRcvDataFrame[(*iDataIdx)++];
-	sensorsdata->y = (s16)iTemp;
-
-	iTemp = (int)pchRcvDataFrame[(*iDataIdx)++];
-	iTemp <<= 8;
-	iTemp += pchRcvDataFrame[(*iDataIdx)++];
-	sensorsdata->z = (s16)iTemp;
-
-}
-
-static void get_factory_data(struct ssp_data *data, int iSensorData,
+static void get_factoty_data(struct ssp_data *data, int iSensorData,
 	char *pchRcvDataFrame, int *iDataIdx)
 {
 	int iIdx, iTotalLenth = 0;
@@ -192,14 +181,6 @@ static void get_factory_data(struct ssp_data *data, int iSensorData,
 		uTemp = (1 << MCU_SLEEP_FACTORY);
 		iTotalLenth = MCU_SLEEP_FACTORY_DATA_LENGTH;
 		break;
-	case GESTURE_FACTORY:
-		uTemp = (1 << GESTURE_FACTORY);
-		iTotalLenth = GESTURE_FACTORY_DATA_LENGTH;
-		break;
-	case TEMPHUMIDITY_CRC_FACTORY:
-		uTemp = (1 << TEMPHUMIDITY_CRC_FACTORY);
-		iTotalLenth = TEMPHUMIDITY_FACTORY_DATA_LENGTH;
-		break;
 	}
 
 	ssp_dbg("[SSP]: %s - Factory test data %d\n", __func__, iSensorData);
@@ -207,57 +188,6 @@ static void get_factory_data(struct ssp_data *data, int iSensorData,
 		data->uFactorydata[iIdx] = (u8)pchRcvDataFrame[(*iDataIdx)++];
 
 	data->uFactorydataReady = uTemp;
-}
-
-static void get_temp_humidity_sensordata(char *pchRcvDataFrame, int *iDataIdx,
-	struct sensor_value *sensorsdata)
-{
-	int iTemp;
-
-	/* Temperature */
-	iTemp = (int)pchRcvDataFrame[(*iDataIdx)++];
-	iTemp <<= 8;
-	iTemp += pchRcvDataFrame[(*iDataIdx)++];
-	sensorsdata->data[0] = (s16)iTemp;
-	/* Humidity */
-	iTemp = (int)pchRcvDataFrame[(*iDataIdx)++];
-	iTemp <<= 8;
-	iTemp += pchRcvDataFrame[(*iDataIdx)++];
-	sensorsdata->data[1] = (s16)iTemp;
-	/* wakelock */
-	sensorsdata->data[2] = (s16)pchRcvDataFrame[(*iDataIdx)++];
-
-
-}
-
-static void get_sig_motion_sensordata(char *pchRcvDataFrame, int *iDataIdx,
-	struct sensor_value *sensorsdata)
-{
-	sensorsdata->sig_motion = (u8)pchRcvDataFrame[(*iDataIdx)++];
-}
-
-static void get_step_det_sensordata(char *pchRcvDataFrame, int *iDataIdx,
-	struct sensor_value *sensorsdata)
-{
-	sensorsdata->step_det = (u8)pchRcvDataFrame[(*iDataIdx)++];
-}
-
-static void get_step_cnt_sensordata(char *pchRcvDataFrame, int *iDataIdx,
-	struct sensor_value *sensorsdata)
-{
-	u32 iTemp = 0;
-
-	iTemp += pchRcvDataFrame[(*iDataIdx)++];
-	iTemp <<= 24;
-
-	iTemp += pchRcvDataFrame[(*iDataIdx)++];
-	iTemp <<= 16;
-
-	iTemp += pchRcvDataFrame[(*iDataIdx)++];
-	iTemp <<= 8;
-
-	iTemp += pchRcvDataFrame[(*iDataIdx)++];
-	sensorsdata->step_diff = iTemp;
 }
 
 int parse_dataframe(struct ssp_data *data, char *pchRcvDataFrame, int iLength)
@@ -274,7 +204,7 @@ int parse_dataframe(struct ssp_data *data, char *pchRcvDataFrame, int iLength)
 			iDataIdx++;
 			iSensorData = pchRcvDataFrame[iDataIdx++];
 			if ((iSensorData < 0) ||
-				(iSensorData >= SENSOR_MAX)) {
+				(iSensorData >= (SENSOR_MAX - 1))) {
 				pr_err("[SSP]: %s - Mcu data frame1 error %d\n",
 					__func__, iSensorData);
 				kfree(sensorsdata);
@@ -296,7 +226,7 @@ int parse_dataframe(struct ssp_data *data, char *pchRcvDataFrame, int iLength)
 				kfree(sensorsdata);
 				return ERROR;
 			}
-			get_factory_data(data, iSensorData, pchRcvDataFrame,
+			get_factoty_data(data, iSensorData, pchRcvDataFrame,
 				&iDataIdx);
 		} else if (pchRcvDataFrame[iDataIdx] ==
 			MSG2AP_INST_DEBUG_DATA) {
@@ -333,12 +263,6 @@ void initialize_function_pointer(struct ssp_data *data)
 	data->get_sensor_data[PROXIMITY_SENSOR] = get_proximity_sensordata;
 	data->get_sensor_data[PROXIMITY_RAW] = get_proximity_rawdata;
 	data->get_sensor_data[LIGHT_SENSOR] = get_light_sensordata;
-	data->get_sensor_data[TEMPERATURE_HUMIDITY_SENSOR] =
-		get_temp_humidity_sensordata;
-	data->get_sensor_data[GEOMAGNETIC_RAW] = get_geomagnetic_rawdata;
-	data->get_sensor_data[SIG_MOTION_SENSOR] = get_sig_motion_sensordata;
-	data->get_sensor_data[STEP_DETECTOR] = get_step_det_sensordata;
-	data->get_sensor_data[STEP_COUNTER] = get_step_cnt_sensordata;
 
 	data->report_sensor_data[ACCELEROMETER_SENSOR] = report_acc_data;
 	data->report_sensor_data[GYROSCOPE_SENSOR] = report_gyro_data;
@@ -348,10 +272,4 @@ void initialize_function_pointer(struct ssp_data *data)
 	data->report_sensor_data[PROXIMITY_SENSOR] = report_prox_data;
 	data->report_sensor_data[PROXIMITY_RAW] = report_prox_raw_data;
 	data->report_sensor_data[LIGHT_SENSOR] = report_light_data;
-	data->report_sensor_data[TEMPERATURE_HUMIDITY_SENSOR] =
-		report_temp_humidity_data;
-	data->report_sensor_data[GEOMAGNETIC_RAW] = report_geomagnetic_raw_data;
-	data->report_sensor_data[SIG_MOTION_SENSOR] = report_sig_motion_data;
-	data->report_sensor_data[STEP_DETECTOR] = report_step_det_data;
-	data->report_sensor_data[STEP_COUNTER] = report_step_cnt_data;
 }

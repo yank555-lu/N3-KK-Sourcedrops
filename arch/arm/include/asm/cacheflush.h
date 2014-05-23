@@ -16,6 +16,7 @@
 #include <asm/shmparam.h>
 #include <asm/cachetype.h>
 #include <asm/outercache.h>
+#include <mach/smc.h>
 
 #define CACHE_COLOUR(vaddr)	((vaddr & (SHMLBA - 1)) >> PAGE_SHIFT)
 
@@ -48,13 +49,6 @@
  *	flush_kern_all()
  *
  *		Unconditionally clean and invalidate the entire cache.
- *
- *     flush_kern_louis()
- *
- *             Flush data cache levels up to the level of unification
- *             inner shareable and invalidate the I-cache.
- *             Only needed from v7 onwards, falls back to flush_cache_all()
- *             for all other processor versions.
  *
  *	flush_user_all()
  *
@@ -94,21 +88,6 @@
  *	DMA Cache Coherency
  *	===================
  *
- *	dma_inv_range(start, end)
- *
- *		Invalidate (discard) the specified virtual address range.
- *		May not write back any entries.  If 'start' or 'end'
- *		are not cache line aligned, those lines must be written
- *		back.
- *		- start  - virtual start address
- *		- end    - virtual end address
- *
- *	dma_clean_range(start, end)
- *
- *		Clean (write back) the specified virtual address range.
- *		- start  - virtual start address
- *		- end    - virtual end address
- *
  *	dma_flush_range(start, end)
  *
  *		Clean and invalidate the specified virtual address range.
@@ -119,7 +98,6 @@
 struct cpu_cache_fns {
 	void (*flush_icache_all)(void);
 	void (*flush_kern_all)(void);
-	void (*flush_kern_louis)(void);
 	void (*flush_user_all)(void);
 	void (*flush_user_range)(unsigned long, unsigned long, unsigned int);
 
@@ -130,8 +108,6 @@ struct cpu_cache_fns {
 	void (*dma_map_area)(const void *, size_t, int);
 	void (*dma_unmap_area)(const void *, size_t, int);
 
-	void (*dma_inv_range)(const void *, const void *);
-	void (*dma_clean_range)(const void *, const void *);
 	void (*dma_flush_range)(const void *, const void *);
 };
 
@@ -144,7 +120,6 @@ extern struct cpu_cache_fns cpu_cache;
 
 #define __cpuc_flush_icache_all		cpu_cache.flush_icache_all
 #define __cpuc_flush_kern_all		cpu_cache.flush_kern_all
-#define __cpuc_flush_kern_louis		cpu_cache.flush_kern_louis
 #define __cpuc_flush_user_all		cpu_cache.flush_user_all
 #define __cpuc_flush_user_range		cpu_cache.flush_user_range
 #define __cpuc_coherent_kern_range	cpu_cache.coherent_kern_range
@@ -159,15 +134,12 @@ extern struct cpu_cache_fns cpu_cache;
  */
 #define dmac_map_area			cpu_cache.dma_map_area
 #define dmac_unmap_area			cpu_cache.dma_unmap_area
-#define dmac_inv_range			cpu_cache.dma_inv_range
-#define dmac_clean_range		cpu_cache.dma_clean_range
 #define dmac_flush_range		cpu_cache.dma_flush_range
 
 #else
 
 extern void __cpuc_flush_icache_all(void);
 extern void __cpuc_flush_kern_all(void);
-extern void __cpuc_flush_kern_louis(void);
 extern void __cpuc_flush_user_all(void);
 extern void __cpuc_flush_user_range(unsigned long, unsigned long, unsigned int);
 extern void __cpuc_coherent_kern_range(unsigned long, unsigned long);
@@ -182,8 +154,6 @@ extern void __cpuc_flush_dcache_area(void *, size_t);
  */
 extern void dmac_map_area(const void *, size_t, int);
 extern void dmac_unmap_area(const void *, size_t, int);
-extern void dmac_inv_range(const void *, const void *);
-extern void dmac_clean_range(const void *, const void *);
 extern void dmac_flush_range(const void *, const void *);
 
 #endif
@@ -235,12 +205,13 @@ static inline void __flush_icache_all(void)
 	__flush_icache_preferred();
 }
 
-/*
- * Flush caches up to Level of Unification Inner Shareable
- */
-#define flush_cache_louis()		__cpuc_flush_kern_louis()
-
 #define flush_cache_all()		__cpuc_flush_kern_all()
+
+#ifndef CONFIG_SMP
+#define flush_all_cpu_caches()		flush_cache_all()
+#else
+extern void flush_all_cpu_caches(void);
+#endif
 
 static inline void vivt_flush_cache_mm(struct mm_struct *mm)
 {
@@ -380,9 +351,37 @@ static inline void flush_cache_vunmap(unsigned long start, unsigned long end)
 		flush_cache_all();
 }
 
-int set_memory_ro(unsigned long addr, int numpages);
-int set_memory_rw(unsigned long addr, int numpages);
-int set_memory_x(unsigned long addr, int numpages);
-int set_memory_nx(unsigned long addr, int numpages);
+/*
+ * Control the full line of zero function that must be enabled
+ * only when the slaves connected on cortex-A9 AXI master port support it.
+ * The L2-310 cache controller supports this feature.
+ */
+#ifdef CONFIG_CACHE_L2X0
+static inline void __enable_cache_foz(int enable)
+{
+	int val;
 
+	asm volatile(
+	"mrc p15, 0, %0, c1, c0, 1\n"
+	: "=r" (val));
+
+	/* enable/disable Foz */
+	if (enable)
+		val |= ((1<<3));
+	else
+		val &= (~(1<<3));
+
+#ifdef CONFIG_ARM_TRUSTZONE
+	exynos_smc(SMC_CMD_REG, SMC_REG_ID_CP15(1, 0, 0, 1), val, 0);
+#else
+	asm volatile("mcr p15, 0, %0, c1, c0, 1" : : "r" (val));
+#endif
+}
+
+#define enable_cache_foz()	__enable_cache_foz(1)
+#define disable_cache_foz()	__enable_cache_foz(0)
+#else
+#define enable_cache_foz()	do { } while (0)
+#define disable_cache_foz()	do { } while (0)
+#endif
 #endif

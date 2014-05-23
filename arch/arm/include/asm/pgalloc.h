@@ -25,34 +25,12 @@
 #define _PAGE_USER_TABLE	(PMD_TYPE_TABLE | PMD_BIT4 | PMD_DOMAIN(DOMAIN_USER))
 #define _PAGE_KERNEL_TABLE	(PMD_TYPE_TABLE | PMD_BIT4 | PMD_DOMAIN(DOMAIN_KERNEL))
 
-#ifdef CONFIG_ARM_LPAE
-
-static inline pmd_t *pmd_alloc_one(struct mm_struct *mm, unsigned long addr)
-{
-	return (pmd_t *)get_zeroed_page(GFP_KERNEL | __GFP_REPEAT);
-}
-
-static inline void pmd_free(struct mm_struct *mm, pmd_t *pmd)
-{
-	BUG_ON((unsigned long)pmd & (PAGE_SIZE-1));
-	free_page((unsigned long)pmd);
-}
-
-static inline void pud_populate(struct mm_struct *mm, pud_t *pud, pmd_t *pmd)
-{
-	set_pud(pud, __pud(__pa(pmd) | PMD_TYPE_TABLE));
-}
-
-#else	/* !CONFIG_ARM_LPAE */
-
 /*
  * Since we have only two-level page tables, these are trivial
  */
 #define pmd_alloc_one(mm,addr)		({ BUG(); ((pmd_t *)2); })
 #define pmd_free(mm, pmd)		do { } while (0)
-#define pud_populate(mm,pmd,pte)	BUG()
-
-#endif	/* CONFIG_ARM_LPAE */
+#define pgd_populate(mm,pmd,pte)	BUG()
 
 extern pgd_t *pgd_alloc(struct mm_struct *mm);
 extern void pgd_free(struct mm_struct *mm, pgd_t *pgd);
@@ -127,113 +105,14 @@ static inline void pte_free(struct mm_struct *mm, pgtable_t pte)
 }
 
 static inline void __pmd_populate(pmd_t *pmdp, phys_addr_t pte,
-				  pmdval_t prot)
+	unsigned long prot)
 {
-	pmdval_t pmdval = (pte + PTE_HWTABLE_OFF) | prot;
-#ifdef	CONFIG_TIMA_RKP_L1_TABLES
-	unsigned long cmd_id = 0x3f809221;
-	unsigned long tima_wr_out, pmd_base;
-#if __GNUC__ >= 4 && __GNUC_MINOR__ >= 6
-        __asm__ __volatile__(".arch_extension sec");
-#endif
-	if (tima_is_pg_protected((unsigned long) pmdp) == 0) {
-		pmdp[0] = __pmd(pmdval);
-#ifndef CONFIG_ARM_LPAE
-		pmdp[1] = __pmd(pmdval + 256 * sizeof(pte_t));
-#endif
-	} else {
-	clean_dcache_area(pmdp, 8);
-	__asm__ __volatile__ (
-		"stmfd  sp!,{r0, r8-r11}\n"
-		"mov   	r11, r0\n"
-		"mov    r0, %1\n"
-		"mov	r8, %2\n"
-		"mov    r9, %3\n"
-		"mov    r10, %4\n"
-		"mcr    p15, 0, r8, c7, c14, 1\n"
-		"add    r8, r8, #4\n"
-		"mcr    p15, 0, r8, c7, c14, 1\n"
-		"dsb\n"
-		"smc    #9\n"
-		"sub    r8, r8, #4\n"
-		"mcr    p15, 0, r8, c7, c6,  1\n"
-		"dsb\n"
-
-		"mov    %0, r10\n"
-		"add    r8, r8, #4\n"
-		"mcr    p15, 0, r8, c7, c6,  1\n"
-		"dsb\n"
-
-		"mov    r0, #0\n"
-		"mcr    p15, 0, r0, c8, c3, 0\n"
-		"dsb\n"
-		"isb\n"
-		"pop    {r0, r8-r11}\n"
-		:"=r"(tima_wr_out):"r"(cmd_id),"r"((unsigned long)pmdp),"r"(pmdval),"r"(__pmd(pmdval + 256 * sizeof(pte_t))):"r0","r8","r9","r10","r11","cc");
-
-	#ifdef CONFIG_TIMA_RKP_DEBUG
-		if ((pmdp[0]|0x4)!=(__pmd(pmdval)|0x4)) {
-			tima_debug_signal_failure(0x3f80f221, 7);
-		}
-		if ((pmdp[1]|0x4)!=((__pmd(pmdval + 256 * sizeof(pte_t)))|0x4)) {
-			tima_debug_signal_failure(0x3f80f221, 8);
-		}
-	#endif
-	}
-#else
+	unsigned long pmdval = (pte + PTE_HWTABLE_OFF) | prot;
 	pmdp[0] = __pmd(pmdval);
-#ifndef CONFIG_ARM_LPAE
 	pmdp[1] = __pmd(pmdval + 256 * sizeof(pte_t));
-#endif
-#endif
 	flush_pmd_entry(pmdp);
-
-#ifdef	CONFIG_TIMA_RKP_L1_TABLES
-        pmd_base = ((unsigned long)pmdp) & (~0x3fff);
-        tima_verify_state(pmd_base, 0, 1, 2);
-        tima_verify_state(pmd_base + 0x1000, 0, 1, 2);
-        tima_verify_state(pmd_base + 0x2000, 0, 1, 2);
-        tima_verify_state(pmd_base + 0x3000, 0, 1, 2);
-#endif
 }
 
-#ifdef 	CONFIG_TIMA_RKP_DEBUG
-static inline void
-tima_verify_pmd_populate(struct mm_struct *mm, pmd_t *pmdp, unsigned long pte_pa)
-{
-	unsigned long pmd_base, pte_va;
-	int i;
-
-	if ((unsigned long)mm->context.id) {
-		/*Get the base of the L1 PGT*/
-		pmd_base = ((unsigned long)pmdp) & (~0x3fff);
-		/*Get the va of the L2 PGT (pointed to by the PMD entry)*/
-		pte_va = (unsigned long)__va(pte_pa);
-
-	#ifdef	CONFIG_TIMA_RKP_L1_TABLES
-		for (i=0; i<4; i++) {
-			if (tima_debug_page_protection(((unsigned long)pmd_base + i*0x1000), 2, 1) == 0) {
-				tima_debug_signal_failure(0x3f80f221, 2);
-				//tima_send_cmd((unsigned long)pmd_base, 0x3f80e221);
-				//printk(KERN_ERR"TIMA: pop L1 UnPrtctd va %lx context id = %lx\n",
-				//	(unsigned long)pmd_base,
-				//	(unsigned long)mm->context.id);
-			}
-		}
-	#endif		
-	#ifdef	CONFIG_TIMA_RKP_L2_TABLES
-		if (tima_debug_page_protection((unsigned long)pte_va, 0x102, 1) == 0) {
-			tima_debug_signal_failure(0x3f80f221, 102);
-			//tima_send_cmd((unsigned long)pte_va, 0x3f80e221);
-			//printk(KERN_ERR"TIMA: pop L2 UnPrtctd va = %lx pa = %lx context id = %lx\n",
-			//	(unsigned long)pte_va, (unsigned long)pte_pa,
-			//	(unsigned long)mm->context.id);
-		}
-	#endif
-	}
-}
-
-#endif /* CONFIG_TIMA_RKP_DEBUG */
 /*
  * Populate the pmdp entry with a pointer to the pte.  This pmd is part
  * of the mm address space.
@@ -247,18 +126,12 @@ pmd_populate_kernel(struct mm_struct *mm, pmd_t *pmdp, pte_t *ptep)
 	 * The pmd must be loaded with the physical address of the PTE table
 	 */
 	__pmd_populate(pmdp, __pa(ptep), _PAGE_KERNEL_TABLE);
-#ifdef 	CONFIG_TIMA_RKP_DEBUG
-	tima_verify_pmd_populate(mm,pmdp,__pa(ptep));
-#endif
 }
 
 static inline void
 pmd_populate(struct mm_struct *mm, pmd_t *pmdp, pgtable_t ptep)
 {
 	__pmd_populate(pmdp, page_to_phys(ptep), _PAGE_USER_TABLE);
-#ifdef 	CONFIG_TIMA_RKP_DEBUG
-	tima_verify_pmd_populate(mm,pmdp,page_to_phys(ptep));
-#endif
 }
 #define pmd_pgtable(pmd) pmd_page(pmd)
 

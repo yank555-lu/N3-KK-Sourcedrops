@@ -18,14 +18,14 @@
 /* factory Sysfs                                                         */
 /*************************************************************************/
 
-#define MODEL_NAME			"AT32UC3L0128"
+#define MODEL_NAME		"AT32UC3L0128"
 
 ssize_t mcu_revision_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
 	struct ssp_data *data = dev_get_drvdata(dev);
 
-	return sprintf(buf, "AT01120%u,AT01120%u\n", get_module_rev(data),
+	return sprintf(buf, "AT0112%u,AT0112%u\n", get_module_rev(),
 		data->uCurFirmRev);
 }
 
@@ -230,7 +230,7 @@ ssize_t mcu_sleep_factorytest_show(struct device *dev,
 	convert_acc_data(&fsb[ACCELEROMETER_SENSOR].z);
 
 exit:
-	ssp_dbg("[SSP]: %s Result - "\
+	ssp_dbg("[SSP]: %s Result - "
 		"%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%u,%u,%u,%u,%u\n", __func__,
 		fsb[ACCELEROMETER_SENSOR].x, fsb[ACCELEROMETER_SENSOR].y,
 		fsb[ACCELEROMETER_SENSOR].z, fsb[GYROSCOPE_SENSOR].x,

@@ -23,19 +23,9 @@ struct mc96_platform_data {
 	int     str1;
 	int     str2;
 	char    char_name;
-	int irda_irq_gpio;
-	u32 irq_gpio_flags;
-	int irda_led_en;
-	u32 led_en_flags;
-	int irda_wake_en;
-	u32 wake_en_flags;
-	int irda_scl_gpio;
-	u32 irda_scl_flags;
-	int irda_sda_gpio;
-	u32 irda_sda_flags;
-	void (*ir_wake_en)(struct mc96_platform_data *pdata, bool onoff);
+	void (*ir_wake_en)(bool onoff);
 	void (*ir_remote_init) (void);
-	void(*ir_vdd_onoff)(struct device *dev,bool onoff);
+	void(*ir_vdd_onoff)(bool onoff);
 };
 
 extern struct class *sec_class;

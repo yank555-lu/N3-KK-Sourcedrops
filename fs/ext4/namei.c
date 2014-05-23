@@ -293,7 +293,7 @@ static struct stats dx_show_leaf(struct dx_hash_info *hinfo, struct ext4_dir_ent
 				while (len--) printk("%c", *name++);
 				ext4fs_dirhash(de->name, de->name_len, &h);
 				printk(":%x.%u ", h.hash,
-				       (unsigned) ((char *) de - base));
+				       ((char *) de - base));
 			}
 			space += EXT4_DIR_REC_LEN(de->name_len);
 			names++;
@@ -472,7 +472,7 @@ fail2:
 fail:
 	if (*err == ERR_BAD_DX_DIR)
 		ext4_warning(dir->i_sb,
-			     "Corrupt dir inode %lu, running e2fsck is "
+			     "Corrupt dir inode %ld, running e2fsck is "
 			     "recommended.", dir->i_ino);
 	return NULL;
 }
@@ -972,8 +972,7 @@ restart:
 				bh = ext4_getblk(NULL, dir, b++, 0, &err);
 				bh_use[ra_max] = bh;
 				if (bh)
-					ll_rw_block(READ | REQ_META | REQ_PRIO,
-						    1, &bh);
+					ll_rw_block(READ_META, 1, &bh);
 			}
 		}
 		if ((bh = bh_use[ra_ptr++]) == NULL)
@@ -1076,7 +1075,7 @@ static struct buffer_head * ext4_dx_find_entry(struct inode *dir, const struct q
 
 	*err = -ENOENT;
 errout:
-	dxtrace(printk(KERN_DEBUG "%s not found\n", d_name->name));
+	dxtrace(printk(KERN_DEBUG "%s not found\n", name));
 	dx_release (frames);
 	return NULL;
 }
@@ -1107,10 +1106,12 @@ static struct dentry *ext4_lookup(struct inode *dir, struct dentry *dentry, stru
 	if (bh) {
 		__u32 ino = le32_to_cpu(de->inode);
 		if (!ext4_valid_inum(dir->i_sb, ino)) {
-			printk(KERN_ERR "Name of directory entry has bad"
-				"inode# : %s\n", de->name);
-			print_bh(dir->i_sb, bh, 0, EXT4_BLOCK_SIZE(dir->i_sb));
-			brelse(bh);
+                        /* for debugging, sangwoo2.lee */
+                        printk(KERN_ERR "Name of directory entry has bad inode# : %s\n", de->name);
+                        printk(KERN_ERR "inode# : %s\n", de->name);
+                        print_bh(dir->i_sb, bh, 0, EXT4_BLOCK_SIZE(dir->i_sb));
+                        /* for debugging */
+                        brelse(bh);
 
 			EXT4_ERROR_INODE(dir, "bad inode number: %u", ino);
 			return ERR_PTR(-EIO);
@@ -1118,11 +1119,16 @@ static struct dentry *ext4_lookup(struct inode *dir, struct dentry *dentry, stru
 		brelse(bh);
 
 		inode = ext4_iget(dir->i_sb, ino);
-		if (inode == ERR_PTR(-ESTALE)) {
-			EXT4_ERROR_INODE(dir,
-			 "deleted inode referenced: %u  at parent inode : %lu",
-					 ino, dir->i_ino);
-			return ERR_PTR(-EIO);
+		if (IS_ERR(inode)) {
+			if (PTR_ERR(inode) == -ESTALE) {
+	                        /* In case of -ESTALE, printing debugging data is already done in ext4_iget */
+				EXT4_ERROR_INODE(dir,
+					         "deleted inode referenced: %u at parent inode : %lu",
+						 ino, dir->i_ino);
+				return ERR_PTR(-EIO);
+			} else {
+				return ERR_CAST(inode);
+			}
 		}
 	}
 #ifdef CONFIG_SDCARD_FS_CI_SEARCH
@@ -1787,7 +1793,7 @@ static void ext4_inc_count(handle_t *handle, struct inode *inode)
 	if (is_dx(inode) && inode->i_nlink > 1) {
 		/* limit is 16-bit i_links_count */
 		if (inode->i_nlink >= EXT4_LINK_MAX || inode->i_nlink == 2) {
-			set_nlink(inode, 1);
+			inode->i_nlink = 1;
 			EXT4_SET_RO_COMPAT_FEATURE(inode->i_sb,
 					      EXT4_FEATURE_RO_COMPAT_DIR_NLINK);
 		}
@@ -1800,8 +1806,9 @@ static void ext4_inc_count(handle_t *handle, struct inode *inode)
  */
 static void ext4_dec_count(handle_t *handle, struct inode *inode)
 {
-	if (!S_ISDIR(inode->i_mode) || inode->i_nlink > 2)
-		drop_nlink(inode);
+	drop_nlink(inode);
+	if (S_ISDIR(inode->i_mode) && inode->i_nlink == 0)
+		inc_nlink(inode);
 }
 
 
@@ -1829,7 +1836,7 @@ static int ext4_add_nondir(handle_t *handle,
  * If the create succeeds, we fill in the inode information
  * with d_instantiate().
  */
-static int ext4_create(struct inode *dir, struct dentry *dentry, umode_t mode,
+static int ext4_create(struct inode *dir, struct dentry *dentry, int mode,
 		       struct nameidata *nd)
 {
 	handle_t *handle;
@@ -1848,7 +1855,7 @@ retry:
 	if (IS_DIRSYNC(dir))
 		ext4_handle_sync(handle);
 
-	inode = ext4_new_inode(handle, dir, mode, &dentry->d_name, 0, NULL);
+	inode = ext4_new_inode(handle, dir, mode, &dentry->d_name, 0);
 	err = PTR_ERR(inode);
 	if (!IS_ERR(inode)) {
 		inode->i_op = &ext4_file_inode_operations;
@@ -1863,7 +1870,7 @@ retry:
 }
 
 static int ext4_mknod(struct inode *dir, struct dentry *dentry,
-		      umode_t mode, dev_t rdev)
+		      int mode, dev_t rdev)
 {
 	handle_t *handle;
 	struct inode *inode;
@@ -1884,7 +1891,7 @@ retry:
 	if (IS_DIRSYNC(dir))
 		ext4_handle_sync(handle);
 
-	inode = ext4_new_inode(handle, dir, mode, &dentry->d_name, 0, NULL);
+	inode = ext4_new_inode(handle, dir, mode, &dentry->d_name, 0);
 	err = PTR_ERR(inode);
 	if (!IS_ERR(inode)) {
 		init_special_inode(inode, inode->i_mode, rdev);
@@ -1899,7 +1906,7 @@ retry:
 	return err;
 }
 
-static int ext4_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
+static int ext4_mkdir(struct inode *dir, struct dentry *dentry, int mode)
 {
 	handle_t *handle;
 	struct inode *inode;
@@ -1924,7 +1931,7 @@ retry:
 		ext4_handle_sync(handle);
 
 	inode = ext4_new_inode(handle, dir, S_IFDIR | mode,
-			       &dentry->d_name, 0, NULL);
+			       &dentry->d_name, 0);
 	err = PTR_ERR(inode);
 	if (IS_ERR(inode))
 		goto out_stop;
@@ -1953,7 +1960,7 @@ retry:
 	de->name_len = 2;
 	strcpy(de->name, "..");
 	ext4_set_de_type(dir->i_sb, de, S_IFDIR);
-	set_nlink(inode, 2);
+	inode->i_nlink = 2;
 	BUFFER_TRACE(dir_block, "call ext4_handle_dirty_metadata");
 	err = ext4_handle_dirty_metadata(handle, inode, dir_block);
 	if (err)
@@ -2078,11 +2085,18 @@ int ext4_orphan_add(handle_t *handle, struct inode *inode)
 	if (!list_empty(&EXT4_I(inode)->i_orphan))
 		goto out_unlock;
 
-	/*
-	 * Orphan handling is only valid for files with data blocks
-	 * being truncated, or files being unlinked. Note that we either
-	 * hold i_mutex, or the inode can not be referenced from outside,
-	 * so i_nlink should not be bumped due to race
+	/* Orphan handling is only valid for files with data blocks
+	 * being truncated, or files being unlinked. */
+
+	/* @@@ FIXME: Observation from aviro:
+	 * I think I can trigger J_ASSERT in ext4_orphan_add().  We block
+	 * here (on s_orphan_lock), so race with ext4_link() which might bump
+	 * ->i_nlink. For, say it, character device. Not a regular file,
+	 * not a directory, not a symlink and ->i_nlink > 0.
+	 *
+	 * tytso, 4/25/2009: I'm not sure how that could happen;
+	 * shouldn't the fs core protect us from these sort of
+	 * unlink()/link() races?
 	 */
 	J_ASSERT((S_ISREG(inode->i_mode) || S_ISDIR(inode->i_mode) ||
 		  S_ISLNK(inode->i_mode)) || inode->i_nlink == 0);
@@ -2314,7 +2328,7 @@ static int ext4_unlink(struct inode *dir, struct dentry *dentry)
 		ext4_warning(inode->i_sb,
 			     "Deleting nonexistent file (%lu), %d",
 			     inode->i_ino, inode->i_nlink);
-		set_nlink(inode, 1);
+		inode->i_nlink = 1;
 	}
 	retval = ext4_delete_entry(handle, dir, de, bh);
 	if (retval)
@@ -2379,7 +2393,7 @@ retry:
 		ext4_handle_sync(handle);
 
 	inode = ext4_new_inode(handle, dir, S_IFLNK|S_IRWXUGO,
-			       &dentry->d_name, 0, NULL);
+			       &dentry->d_name, 0);
 	err = PTR_ERR(inode);
 	if (IS_ERR(inode))
 		goto out_stop;
@@ -2416,7 +2430,7 @@ retry:
 			err = PTR_ERR(handle);
 			goto err_drop_inode;
 		}
-		set_nlink(inode, 1);
+		inc_nlink(inode);
 		err = ext4_orphan_del(handle, inode);
 		if (err) {
 			ext4_journal_stop(handle);
@@ -2651,7 +2665,7 @@ static int ext4_rename(struct inode *old_dir, struct dentry *old_dentry,
 		if (new_inode) {
 			/* checked empty_dir above, can't have another parent,
 			 * ext4_dec_count() won't work for many-linked dirs */
-			clear_nlink(new_inode);
+			new_inode->i_nlink = 0;
 		} else {
 			ext4_inc_count(handle, new_dir);
 			ext4_update_dx_flag(new_dir);
@@ -2698,7 +2712,7 @@ const struct inode_operations ext4_dir_inode_operations = {
 	.listxattr	= ext4_listxattr,
 	.removexattr	= generic_removexattr,
 #endif
-	.get_acl	= ext4_get_acl,
+	.check_acl	= ext4_check_acl,
 	.fiemap         = ext4_fiemap,
 };
 
@@ -2710,5 +2724,5 @@ const struct inode_operations ext4_special_inode_operations = {
 	.listxattr	= ext4_listxattr,
 	.removexattr	= generic_removexattr,
 #endif
-	.get_acl	= ext4_get_acl,
+	.check_acl	= ext4_check_acl,
 };

@@ -21,26 +21,19 @@
 #include <linux/kdebug.h>
 #include <linux/module.h>
 #include <linux/kexec.h>
-#include <linux/bug.h>
 #include <linux/delay.h>
 #include <linux/init.h>
 #include <linux/sched.h>
 
-#include <linux/atomic.h>
+#include <asm/atomic.h>
 #include <asm/cacheflush.h>
-#include <asm/exception.h>
+#include <asm/system.h>
 #include <asm/unistd.h>
 #include <asm/traps.h>
 #include <asm/unwind.h>
 #include <asm/tls.h>
-#include <asm/system_misc.h>
 
 #include "signal.h"
-#ifdef CONFIG_SEC_DEBUG
-#include <mach/sec_debug.h>
-#endif
-
-#include <trace/events/exception.h>
 
 static const char *handler[]= { "prefetch abort", "data abort", "address exception", "interrupt" };
 
@@ -232,11 +225,6 @@ void show_stack(struct task_struct *tsk, unsigned long *sp)
 #else
 #define S_SMP ""
 #endif
-#ifdef CONFIG_THUMB2_KERNEL
-#define S_ISA " THUMB2"
-#else
-#define S_ISA " ARM"
-#endif
 
 static int __die(const char *str, int err, struct thread_info *thread, struct pt_regs *regs)
 {
@@ -244,8 +232,8 @@ static int __die(const char *str, int err, struct thread_info *thread, struct pt
 	static int die_counter;
 	int ret;
 
-	printk(KERN_EMERG "Internal error: %s: %x [#%d]" S_PREEMPT S_SMP
-	       S_ISA "\n", str, err, ++die_counter);
+	printk(KERN_EMERG "Internal error: %s: %x [#%d]" S_PREEMPT S_SMP "\n",
+	       str, err, ++die_counter);
 
 	/* trap and error numbers are mostly meaningless on ARM */
 	ret = notify_die(DIE_OOPS, str, regs, err, tsk->thread.trap_no, SIGSEGV);
@@ -258,22 +246,23 @@ static int __die(const char *str, int err, struct thread_info *thread, struct pt
 		TASK_COMM_LEN, tsk->comm, task_pid_nr(tsk), thread + 1);
 
 	if (!user_mode(regs) || in_interrupt()) {
-#ifndef CONFIG_SEC_DEBUG
-		dump_mem(KERN_EMERG, "Stack: ", regs->ARM_sp,
-			 THREAD_SIZE + (unsigned long)task_stack_page(tsk));
-#else
-		if (THREAD_SIZE + (unsigned long)task_stack_page(tsk) - regs->ARM_sp
-			> THREAD_SIZE) {
-			dump_mem(KERN_EMERG, "Stack: ", regs->ARM_sp,
-					THREAD_SIZE/4 + regs->ARM_sp);
-		} else {
-			dump_mem(KERN_EMERG, "Stack: ", regs->ARM_sp,
-					THREAD_SIZE + (unsigned long)task_stack_page(tsk));
+#ifdef CONFIG_MACH_TAB3
+		/* Wrong stack pointer can make too much stack dump */
+		unsigned long dump_end;
+		if (likely(regs->ARM_sp > (unsigned long)task_stack_page(tsk)))
+			dump_end = THREAD_SIZE + (unsigned long)task_stack_page(tsk);
+		else {
+			printk(KERN_EMERG "SP may be wrong\n");
+			dump_end = THREAD_SIZE + regs->ARM_sp;
 		}
-#endif
 
+		dump_mem(KERN_EMERG, "Stack: ", regs->ARM_sp, dump_end);
+		printk(KERN_EMERG "stack: (0x%08lx to 0x%08lx)\n",
+			regs->ARM_sp, dump_end);
+#else
 		dump_mem(KERN_EMERG, "Stack: ", regs->ARM_sp,
 			 THREAD_SIZE + (unsigned long)task_stack_page(tsk));
+#endif
 		dump_backtrace(regs, tsk);
 		dump_instr(KERN_EMERG, regs);
 	}
@@ -281,7 +270,7 @@ static int __die(const char *str, int err, struct thread_info *thread, struct pt
 	return ret;
 }
 
-static DEFINE_RAW_SPINLOCK(die_lock);
+static DEFINE_SPINLOCK(die_lock);
 
 /*
  * This function is protected against re-entrancy.
@@ -290,32 +279,20 @@ void die(const char *str, struct pt_regs *regs, int err)
 {
 	struct thread_info *thread = current_thread_info();
 	int ret;
-	enum bug_trap_type bug_type = BUG_TRAP_TYPE_NONE;
 
 	oops_enter();
 
-	raw_spin_lock_irq(&die_lock);
-#ifdef CONFIG_SEC_DEBUG
-	secdbg_sched_msg("!!die!!");
-#endif
+	spin_lock_irq(&die_lock);
 	console_verbose();
 	bust_spinlocks(1);
-	if (!user_mode(regs))
-		bug_type = report_bug(regs->ARM_pc, regs);
-	if (bug_type != BUG_TRAP_TYPE_NONE)
-		str = "Oops - BUG";
 	ret = __die(str, err, thread, regs);
-#ifdef CONFIG_SEC_DEBUG_SUBSYS
-	sec_debug_save_die_info(str, regs);
-#endif
-
 
 	if (regs && kexec_should_crash(thread->task))
 		crash_kexec(regs);
 
 	bust_spinlocks(0);
 	add_taint(TAINT_DIE);
-	raw_spin_unlock_irq(&die_lock);
+	spin_unlock_irq(&die_lock);
 	oops_exit();
 
 	if (in_interrupt())
@@ -339,43 +316,25 @@ void arm_notify_die(const char *str, struct pt_regs *regs,
 	}
 }
 
-#ifdef CONFIG_GENERIC_BUG
-
-int is_valid_bugaddr(unsigned long pc)
-{
-#ifdef CONFIG_THUMB2_KERNEL
-	unsigned short bkpt;
-#else
-	unsigned long bkpt;
-#endif
-
-	if (probe_kernel_address((unsigned *)pc, bkpt))
-		return 0;
-
-	return bkpt == BUG_INSTR_VALUE;
-}
-
-#endif
-
 static LIST_HEAD(undef_hook);
-static DEFINE_RAW_SPINLOCK(undef_lock);
+static DEFINE_SPINLOCK(undef_lock);
 
 void register_undef_hook(struct undef_hook *hook)
 {
 	unsigned long flags;
 
-	raw_spin_lock_irqsave(&undef_lock, flags);
+	spin_lock_irqsave(&undef_lock, flags);
 	list_add(&hook->node, &undef_hook);
-	raw_spin_unlock_irqrestore(&undef_lock, flags);
+	spin_unlock_irqrestore(&undef_lock, flags);
 }
 
 void unregister_undef_hook(struct undef_hook *hook)
 {
 	unsigned long flags;
 
-	raw_spin_lock_irqsave(&undef_lock, flags);
+	spin_lock_irqsave(&undef_lock, flags);
 	list_del(&hook->node);
-	raw_spin_unlock_irqrestore(&undef_lock, flags);
+	spin_unlock_irqrestore(&undef_lock, flags);
 }
 
 static int call_undef_hook(struct pt_regs *regs, unsigned int instr)
@@ -384,12 +343,12 @@ static int call_undef_hook(struct pt_regs *regs, unsigned int instr)
 	unsigned long flags;
 	int (*fn)(struct pt_regs *regs, unsigned int instr) = NULL;
 
-	raw_spin_lock_irqsave(&undef_lock, flags);
+	spin_lock_irqsave(&undef_lock, flags);
 	list_for_each_entry(hook, &undef_hook, node)
 		if ((instr & hook->instr_mask) == hook->instr_val &&
 		    (regs->ARM_cpsr & hook->cpsr_mask) == hook->cpsr_val)
 			fn = hook->fn;
-	raw_spin_unlock_irqrestore(&undef_lock, flags);
+	spin_unlock_irqrestore(&undef_lock, flags);
 
 	return fn ? fn(regs, instr) : 1;
 }
@@ -411,32 +370,15 @@ asmlinkage void __exception do_undefinstr(struct pt_regs *regs)
 	pc = (void __user *)instruction_pointer(regs);
 
 	if (processor_mode(regs) == SVC_MODE) {
-#ifdef CONFIG_THUMB2_KERNEL
-		if (thumb_mode(regs)) {
-			instr = ((u16 *)pc)[0];
-			if (is_wide_instruction(instr)) {
-				instr <<= 16;
-				instr |= ((u16 *)pc)[1];
-			}
-		} else
-#endif
-			instr = *(u32 *) pc;
+		instr = *(u32 *) pc;
 	} else if (thumb_mode(regs)) {
 		get_user(instr, (u16 __user *)pc);
-		if (is_wide_instruction(instr)) {
-			unsigned int instr2;
-			get_user(instr2, (u16 __user *)pc+1);
-			instr <<= 16;
-			instr |= instr2;
-		}
 	} else {
 		get_user(instr, (u32 __user *)pc);
 	}
 
 	if (call_undef_hook(regs, instr) == 0)
 		return;
-
-	trace_undef_instr(regs, (void *)pc);
 
 #ifdef CONFIG_DEBUG_USER
 	if (user_debug & UDBG_UNDEFINED) {
@@ -590,7 +532,7 @@ asmlinkage int arm_syscall(int no, struct pt_regs *regs)
 		return regs->ARM_r0;
 
 	case NR(set_tls):
-		thread->tp_value[0] = regs->ARM_r0;
+		thread->tp_value = regs->ARM_r0;
 		if (tls_emu)
 			return 0;
 		if (has_tls_reg) {
@@ -708,7 +650,7 @@ static int get_tp_trap(struct pt_regs *regs, unsigned int instr)
 	int reg = (instr >> 12) & 15;
 	if (reg == 15)
 		return 1;
-	regs->uregs[reg] = current_thread_info()->tp_value[0];
+	regs->uregs[reg] = current_thread_info()->tp_value;
 	regs->ARM_pc += 4;
 	return 0;
 }
@@ -766,6 +708,16 @@ baddataabort(int code, unsigned long instr, struct pt_regs *regs)
 	arm_notify_die("unknown data abort code", regs, &info, instr, 0);
 }
 
+void __attribute__((noreturn)) __bug(const char *file, int line)
+{
+	printk(KERN_CRIT"kernel BUG at %s:%d!\n", file, line);
+	*(int *)0 = 0;
+
+	/* Avoid "noreturn function does return" */
+	for (;;);
+}
+EXPORT_SYMBOL(__bug);
+
 void __readwrite_bug(const char *fn)
 {
 	printk("%s called, but not implemented\n", fn);
@@ -809,44 +761,27 @@ void __init trap_init(void)
 	return;
 }
 
-#ifdef CONFIG_KUSER_HELPERS
-static void __init kuser_init(void *vectors)
+static void __init kuser_get_tls_init(unsigned long vectors)
 {
-	extern char __kuser_helper_start[], __kuser_helper_end[];
-	int kuser_sz = __kuser_helper_end - __kuser_helper_start;
-
-	memcpy(vectors + 0x1000 - kuser_sz, __kuser_helper_start, kuser_sz);
-
 	/*
 	 * vectors + 0xfe0 = __kuser_get_tls
 	 * vectors + 0xfe8 = hardware TLS instruction at 0xffff0fe8
 	 */
 	if (tls_emu || has_tls_reg)
-		memcpy(vectors + 0xfe0, vectors + 0xfe8, 4);
+		memcpy((void *)vectors + 0xfe0, (void *)vectors + 0xfe8, 4);
 }
-#else
-static void __init kuser_init(void *vectors)
-{
-}
-#endif
 
-void __init early_trap_init(void *vectors_base)
+void __init early_trap_init(void)
 {
-	unsigned long vectors = (unsigned long)vectors_base;
+#if defined(CONFIG_CPU_USE_DOMAINS)
+	unsigned long vectors = CONFIG_VECTORS_BASE;
+#else
+	unsigned long vectors = (unsigned long)vectors_page;
+#endif
 	extern char __stubs_start[], __stubs_end[];
 	extern char __vectors_start[], __vectors_end[];
-	unsigned i;
-
-	vectors_page = vectors_base;
-
-	/*
-	 * Poison the vectors page with an undefined instruction.  This
-	 * instruction is chosen to be undefined for both ARM and Thumb
-	 * ISAs.  The Thumb version is an undefined instruction with a
-	 * branch back to the undefined instruction.
-	 */
-	for (i = 0; i < PAGE_SIZE / sizeof(u32); i++)
-		((u32 *)vectors_base)[i] = 0xe7fddef1;
+	extern char __kuser_helper_start[], __kuser_helper_end[];
+	int kuser_sz = __kuser_helper_end - __kuser_helper_start;
 
 	/*
 	 * Copy the vectors, stubs and kuser helpers (in entry-armv.S)
@@ -854,10 +789,23 @@ void __init early_trap_init(void *vectors_base)
 	 * are visible to the instruction stream.
 	 */
 	memcpy((void *)vectors, __vectors_start, __vectors_end - __vectors_start);
-	memcpy((void *)vectors + 0x1000, __stubs_start, __stubs_end - __stubs_start);
+	memcpy((void *)vectors + 0x200, __stubs_start, __stubs_end - __stubs_start);
+	memcpy((void *)vectors + 0x1000 - kuser_sz, __kuser_helper_start, kuser_sz);
 
-	kuser_init(vectors_base);
+	/*
+	 * Do processor specific fixups for the kuser helpers
+	 */
+	kuser_get_tls_init(vectors);
 
-	flush_icache_range(vectors, vectors + PAGE_SIZE * 2);
+	/*
+	 * Copy signal return handlers into the vector page, and
+	 * set sigreturn to be a pointer to these.
+	 */
+	memcpy((void *)(vectors + KERN_SIGRETURN_CODE - CONFIG_VECTORS_BASE),
+	       sigreturn_codes, sizeof(sigreturn_codes));
+	memcpy((void *)(vectors + KERN_RESTART_CODE - CONFIG_VECTORS_BASE),
+	       syscall_restart_code, sizeof(syscall_restart_code));
+
+	flush_icache_range(vectors, vectors + PAGE_SIZE);
 	modify_domain(DOMAIN_USER, DOMAIN_CLIENT);
 }

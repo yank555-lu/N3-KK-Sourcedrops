@@ -213,6 +213,7 @@ static struct dentry *__sdcardfs_lookup(struct dentry *dentry,
 	struct dentry *lower_dir_dentry = NULL;
 	struct dentry *lower_dentry;
 	const char *name;
+	struct nameidata lower_nd;
 	struct path lower_path;
 	struct qstr this;
 	struct sdcardfs_sb_info *sbi;
@@ -233,10 +234,10 @@ static struct dentry *__sdcardfs_lookup(struct dentry *dentry,
 	/* Use vfs_path_lookup to check if the dentry exists or not */
 	if (sbi->options.lower_fs == LOWER_FS_EXT4) {
 		err = vfs_path_lookup(lower_dir_dentry, lower_dir_mnt, name,
-				LOOKUP_CASE_INSENSITIVE, &lower_path);
+				LOOKUP_CASE_INSENSITIVE, &lower_nd);
 	} else if (sbi->options.lower_fs == LOWER_FS_FAT) {
 		err = vfs_path_lookup(lower_dir_dentry, lower_dir_mnt, name, 0,
-				&lower_path);
+				&lower_nd);
 	}
 
 	/* no error: handle positive dentries */
@@ -252,7 +253,7 @@ static struct dentry *__sdcardfs_lookup(struct dentry *dentry,
 			 * and the base obbpath will be copyed to the lower_path variable.
 			 * if an error returned, there's no change in the lower_path 
 			 * 		returns: -ERRNO if error (0: no error) */
-			err = setup_obb_dentry(dentry, &lower_path);
+			err = setup_obb_dentry(dentry, &lower_nd.path);
 
 			if(err) { 
 				/* if the sbi->obbpath is not available, we can optionally
@@ -266,8 +267,8 @@ static struct dentry *__sdcardfs_lookup(struct dentry *dentry,
 			}
 		}
 
-		sdcardfs_set_lower_path(dentry, &lower_path);
-		err = sdcardfs_interpose(dentry, dentry->d_sb, &lower_path);
+		sdcardfs_set_lower_path(dentry, &lower_nd.path);
+		err = sdcardfs_interpose(dentry, dentry->d_sb, &lower_nd.path);
 		if (err) /* path_put underlying path on error */
 			sdcardfs_put_reset_lower_path(dentry);
 		goto out;

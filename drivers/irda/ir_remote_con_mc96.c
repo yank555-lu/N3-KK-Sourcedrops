@@ -31,18 +31,15 @@
 #include <linux/workqueue.h>
 #include <linux/device.h>
 #include <linux/ir_remote_con_mc96.h>
-#include <linux/regulator/consumer.h>
-#if defined (CONFIG_OF)
-#include <linux/of_device.h>
-#include <linux/of_gpio.h>
-#endif
 #include <linux/earlysuspend.h>
-#include "irda_fw_version202.h"
+#include "irda_fw.h"
 #include <mach/gpio.h>
-#include <linux/ir_remote_con_mc96.h>
+
 #define MAX_SIZE 2048
 #define MC96_READ_LENGTH	8
 #define DUMMY 0xffff
+
+#define USE_STOP_MODE
 
 struct ir_remocon_data {
 	struct mutex			mutex;
@@ -68,37 +65,6 @@ static int ack_number;
 static int retry_count;
 static int download_pass;
 
-#ifdef CONFIG_IR_REMOCON_MC96
-static void irda_wake_en(struct mc96_platform_data *pdata, bool onoff)
-{
-	/*Need to add parser before this*/
-        gpio_direction_output(pdata->irda_wake_en, onoff);
-        printk(KERN_ERR "%s: irda_wake_en : %d\n", __func__, onoff);
-}
-
-static int vled_ic_onoff;
-static struct regulator *vled_ic;
-
-static void irda_vdd_onoff(struct device *dev,bool onoff)
-{
-
-        if (onoff) {
-		if(regulator_set_voltage(vled_ic,1900000,1900000))
-			pr_err("%s regulaor set volatge failed\n",__func__);
-		if(regulator_enable(vled_ic))	
-			pr_err("%s regulaor enable failed\n",__func__);
-                vled_ic_onoff = 1;
-		printk(KERN_CRIT "%s Regulator On!\n",__func__);
-        } else if (vled_ic_onoff == 1) {
-                regulator_disable(vled_ic);
-                vled_ic_onoff = 0;
-		printk(KERN_CRIT "%s Regulator OFF!\n",__func__);
-        }
-}
-
-
-#endif
-
 static int irda_fw_update(struct ir_remocon_data *ir_data)
 {
 	struct ir_remocon_data *data = ir_data;
@@ -106,14 +72,12 @@ static int irda_fw_update(struct ir_remocon_data *ir_data)
 	int i, k, ret, ret2, checksum, checksum2;
 	u8 buf_ir_test[8];
 
-	data->pdata->ir_vdd_onoff(&client->dev, 0);
-	data->pdata->ir_wake_en(data->pdata, 0);
+	msleep(20);
+	data->pdata->ir_vdd_onoff(0);
+	msleep(20);
+	data->pdata->ir_vdd_onoff(1);
+	data->pdata->ir_wake_en(1);
 	msleep(100);
-	data->pdata->ir_vdd_onoff(&client->dev, 1);
-	data->pdata->ir_wake_en(data->pdata,1);
-	gpio_tlmm_config(GPIO_CFG(data->pdata->irda_irq_gpio,  0, GPIO_CFG_INPUT,
-			GPIO_CFG_PULL_UP, GPIO_CFG_2MA), GPIO_CFG_ENABLE);
-	msleep(70);
 
 	ret = i2c_master_recv(client, buf_ir_test, MC96_READ_LENGTH);
 	if (ret < 0) {
@@ -124,38 +88,19 @@ static int irda_fw_update(struct ir_remocon_data *ir_data)
 			retry_count = 1;
 		}
 	}
-	
-#ifdef DEBUG
-	print_hex_dump(KERN_CRIT, "IRDA Master Rx: ", 16, 1,
-				DUMP_PREFIX_ADDRESS, buf_ir_test, 8, 1);
-#endif
 	ret = buf_ir_test[2] << 8 | buf_ir_test[3];
-
-	if (ret == 0x101) {
-		data->pdata->ir_wake_en(data->pdata,0);
-		data->pdata->ir_vdd_onoff(&client->dev,0);
-		data->on_off = 0;
-		msleep(100);
-		download_pass = 1;
-		return 0;
-	}
 	if ((ret != FW_VERSION) || (retry_count != 0)) {
 		printk(KERN_INFO "2. %s: chip : %04x, bin : %04x, need update!\n",
 						__func__, ret, FW_VERSION);
-		data->pdata->ir_vdd_onoff(&client->dev, 0);
-		data->pdata->ir_wake_en(data->pdata, 0);
+		data->pdata->ir_vdd_onoff(0);
+		data->pdata->ir_wake_en(0);
+		msleep(20);
+		data->pdata->ir_vdd_onoff(1);
 		msleep(100);
-		data->pdata->ir_vdd_onoff(&client->dev,1);
-		msleep(70);
 
 		ret = i2c_master_recv(client, buf_ir_test, MC96_READ_LENGTH);
 		if (ret < 0)
-			printk(KERN_ERR " %s: err %d\n", __func__, ret);
-
-#ifdef DEBUG
-		print_hex_dump(KERN_CRIT, "IRDA Master Rx: ", 16, 1,
-				DUMP_PREFIX_ADDRESS, buf_ir_test, 8, 1);
-#endif
+			printk(KERN_ERR "3. %s: err %d\n", __func__, ret);
 
 		ret = buf_ir_test[6] << 8 | buf_ir_test[7];
 
@@ -193,11 +138,6 @@ static int irda_fw_update(struct ir_remocon_data *ir_data)
 		if (ret < 0)
 			printk(KERN_ERR "5. %s: err %d\n", __func__, ret);
 
-#ifdef DEBUG
-		print_hex_dump(KERN_CRIT, "IRDA Master Rx: ", 16, 1,
-				DUMP_PREFIX_ADDRESS, buf_ir_test, 8, 1);
-#endif
-
 		ret = buf_ir_test[6] << 8 | buf_ir_test[7];
 		checksum = 0;
 		for (k = 0; k < 6; k++)
@@ -206,7 +146,6 @@ static int irda_fw_update(struct ir_remocon_data *ir_data)
 		msleep(20);
 
 		ret2 = i2c_master_recv(client, buf_ir_test, MC96_READ_LENGTH);
-	
 		if (ret2 < 0)
 			printk(KERN_ERR "6. %s: err %d\n", __func__, ret2);
 
@@ -229,32 +168,27 @@ static int irda_fw_update(struct ir_remocon_data *ir_data)
 			goto err_bootmode;
 		}
 
-		data->pdata->ir_vdd_onoff(&client->dev, 0);
-		msleep(100);
-		data->pdata->ir_vdd_onoff(&client->dev, 1);
-		data->pdata->ir_wake_en(data->pdata, 1);
-		msleep(70);
-
+		data->pdata->ir_vdd_onoff(0);
+		msleep(20);
+		data->pdata->ir_vdd_onoff(1);
+		data->pdata->ir_wake_en(1);
+		msleep(60);
 		ret = i2c_master_recv(client, buf_ir_test, MC96_READ_LENGTH);
+
 		ret = buf_ir_test[2] << 8 | buf_ir_test[3];
 		printk(KERN_INFO "7. %s: user mode : Upgrade FW_version : %04x\n",
 						__func__, ret);
-
-#ifdef DEBUG
-	print_hex_dump(KERN_CRIT, "IRDA Master Rx: ", 16, 1,
-				DUMP_PREFIX_ADDRESS, buf_ir_test, 8, 1);
-#endif
-
-		data->pdata->ir_wake_en(data->pdata,0);
-		data->pdata->ir_vdd_onoff(&client->dev,0);
+		data->pdata->ir_wake_en(0);
+		data->pdata->ir_vdd_onoff(0);
 		data->on_off = 0;
+		msleep(100);
 
 	} else {
 		if (ret != DUMMY)
 			printk(KERN_INFO "8. %s: chip : %04x, bin : %04x, latest FW_ver\n",
 						__func__, ret, FW_VERSION);
-		data->pdata->ir_wake_en(data->pdata,0);
-		data->pdata->ir_vdd_onoff(&client->dev,0);
+		data->pdata->ir_wake_en(0);
+		data->pdata->ir_vdd_onoff(0);
 		data->on_off = 0;
 		msleep(100);
 
@@ -270,8 +204,8 @@ err_update:
 err_bootmode:
 	printk(KERN_ERR "%s: update fail, checksum = %x ret = %x\n",
 					__func__, checksum, ret);
-	data->pdata->ir_wake_en(data->pdata,0);
-	data->pdata->ir_vdd_onoff(&client->dev,0);
+	data->pdata->ir_wake_en(0);
+	data->pdata->ir_vdd_onoff(0);
 	data->on_off = 0;
 	return ret;
 }
@@ -280,7 +214,6 @@ static void irda_add_checksum_length(struct ir_remocon_data *ir_data, int count)
 {
 	struct ir_remocon_data *data = ir_data;
 	int i = 0, csum = 0;
-
 #if 0
 	printk(KERN_INFO "%s: length: %04x\n", __func__, count);
 #endif
@@ -307,8 +240,8 @@ static int irda_read_device_info(struct ir_remocon_data *ir_data)
 	int ret;
 
 	printk(KERN_INFO"%s called\n", __func__);
-	data->pdata->ir_vdd_onoff(&client->dev,1);
-	data->pdata->ir_wake_en(data->pdata,1);
+	data->pdata->ir_vdd_onoff(1);
+	data->pdata->ir_wake_en(1);
 	msleep(60);
 	ret = i2c_master_recv(client, buf_ir_test, MC96_READ_LENGTH);
 
@@ -319,8 +252,8 @@ static int irda_read_device_info(struct ir_remocon_data *ir_data)
 			buf_ir_test[2], buf_ir_test[3]);
 	ret = data->dev_id = (buf_ir_test[2] << 8 | buf_ir_test[3]);
 
-	data->pdata->ir_wake_en(data->pdata,0);
-	data->pdata->ir_vdd_onoff(&client->dev,0);
+	data->pdata->ir_wake_en(0);
+	data->pdata->ir_vdd_onoff(0);
 	data->on_off = 0;
 	return ret;
 }
@@ -337,7 +270,6 @@ static void ir_remocon_work(struct ir_remocon_data *ir_data, int count)
 	int end_data;
 	int emission_time;
 	int ack_pin_onoff;
-	int i;
 
 	if (count_number >= 100)
 		count_number = 0;
@@ -361,7 +293,7 @@ static void ir_remocon_work(struct ir_remocon_data *ir_data, int count)
 	mdelay(10);
 
 	ack_pin_onoff = 0;
-	if (gpio_get_value(data->pdata->irda_irq_gpio)) {
+	if (gpio_get_value(GPIO_IRDA_IRQ)) {
 		printk(KERN_INFO "%s : %d Checksum NG!\n",
 			__func__, count_number);
 		ack_pin_onoff = 1;
@@ -374,11 +306,12 @@ static void ir_remocon_work(struct ir_remocon_data *ir_data, int count)
 
 	mutex_unlock(&data->mutex);
 
-	for (i = 0; i < buf_size; i++) {
+/*
+	for (int i = 0; i < buf_size; i++) {
 		printk(KERN_INFO "%s: data[%d] : 0x%02x\n", __func__, i,
-					data->signal[i]);
-	
+				data->signal[i]);
 	}
+*/
 	data->count = 2;
 
 	end_data = data->signal[count-2] << 8 | data->signal[count-1];
@@ -397,7 +330,7 @@ static void ir_remocon_work(struct ir_remocon_data *ir_data, int count)
 		printk(KERN_INFO "%s: emission_time = %d\n",
 					__func__, emission_time);
 
-	if (gpio_get_value(data->pdata->irda_irq_gpio)) {
+	if (gpio_get_value(GPIO_IRDA_IRQ)) {
 		printk(KERN_INFO "%s : %d Sending IR OK!\n",
 				__func__, count_number);
 		ack_pin_onoff = 4;
@@ -409,15 +342,13 @@ static void ir_remocon_work(struct ir_remocon_data *ir_data, int count)
 
 	ack_number += ack_pin_onoff;
 #ifndef USE_STOP_MODE
+	data->pdata->ir_vdd_onoff(0);
 	data->on_off = 0;
-	data->pdata->ir_wake_en(data->pdata,0);
-	data->pdata->ir_vdd_onoff(&client->dev,0);
+	data->pdata->ir_wake_en(0);
 #endif
 	data->ir_freq = 0;
 	data->ir_sum = 0;
-
 }
-
 
 static ssize_t remocon_store(struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t size)
@@ -434,15 +365,14 @@ static ssize_t remocon_store(struct device *dev, struct device_attribute *attr,
 			if (data->count == 2) {
 				data->ir_freq = _data;
 				if (data->on_off) {
-					data->pdata->ir_wake_en(data->pdata,0);
+					data->pdata->ir_wake_en(0);
 					udelay(200);
-					data->pdata->ir_wake_en(data->pdata,1);
+					data->pdata->ir_wake_en(1);
 					msleep(30);
 				} else {
-					data->pdata->ir_vdd_onoff(dev,1); 
-					data->pdata->ir_wake_en(data->pdata,1);
-
-					msleep(80);
+					data->pdata->ir_vdd_onoff(1);
+					data->pdata->ir_wake_en(1);
+					msleep(60);
 					data->on_off = 1;
 				}
 				data->signal[2] = _data >> 16;
@@ -465,6 +395,7 @@ static ssize_t remocon_store(struct device *dev, struct device_attribute *attr,
 			break;
 		}
 	}
+
 	ir_remocon_work(data, data->count);
 	return size;
 }
@@ -488,7 +419,7 @@ static ssize_t remocon_show(struct device *dev, struct device_attribute *attr,
 static ssize_t remocon_ack(struct device *dev, struct device_attribute *attr,
 		char *buf)
 {
-	//struct ir_remocon_data *data = dev_get_drvdata(dev);
+	struct ir_remocon_data *data = dev_get_drvdata(dev);
 
 	printk(KERN_INFO "%s : ack_number = %d\n", __func__, ack_number);
 
@@ -514,77 +445,15 @@ static ssize_t check_ir_show(struct device *dev, struct device_attribute *attr,
 static DEVICE_ATTR(check_ir, 0664, check_ir_show, NULL);
 
 
-#ifdef CONFIG_OF
-static int irda_mc96_parse_dt(struct device *dev, struct mc96_platform_data *pdata)
-{
-
-        struct device_node *np = dev->of_node;
-
-        pdata->irda_irq_gpio = of_get_named_gpio_flags(np, "mc96fr332,irda_irq_gpio",
-                               0, &pdata->irq_gpio_flags);
-        pdata->irda_led_en = of_get_named_gpio_flags(np, "mc96fr332,irda_led_en",
-                               0, &pdata->led_en_flags);
-        pdata->irda_wake_en = of_get_named_gpio_flags(np, "mc96fr332,irda_wake",
-				0, &pdata->wake_en_flags);
-	pdata->irda_scl_gpio = of_get_named_gpio_flags(np, "mc96fr332,scl-gpio",
-                               0, &pdata->irda_scl_flags);
-	pdata->irda_sda_gpio = of_get_named_gpio_flags(np, "mc96fr332,sda-gpio",
-                               0, &pdata->irda_sda_flags);
-        pr_info("%s: irq-gpio:%u led_en:%u wake_up:%u irda-scl:%u irda-sda:%u \n", __func__,
-			 pdata->irda_irq_gpio,pdata->irda_led_en,pdata->irda_wake_en,pdata->irda_scl_gpio,pdata->irda_sda_gpio);
-	
-        return 0;
-}
-#endif
-
 static int __devinit ir_remocon_probe(struct i2c_client *client,
 		const struct i2c_device_id *id)
 {
 	struct i2c_adapter *adapter = to_i2c_adapter(client->dev.parent);
 	struct ir_remocon_data *data;
 	struct device *ir_remocon_dev;
-	struct mc96_platform_data *pdata;
 	int i, error;
-	int ret;
 
 	printk(KERN_INFO "%s start!\n", __func__);
-	dev_info(&client->dev,"%s:ir_remocon probe called \n",__func__);
-	if(client->dev.of_node) {
-		pdata = devm_kzalloc(&client->dev,
-			sizeof(struct mc96_platform_data), GFP_KERNEL);
-		if (!pdata) {
-			dev_err(&client->dev, "Failed to allocate memory \n");
-				return -ENOMEM;
-		}
-		ret = irda_mc96_parse_dt(&client->dev, pdata);
-		if (ret < 0)
-		{
-			dev_err(&client->dev,"Parse failed \n");
-			return ret;
-		}
-		pdata->ir_wake_en = irda_wake_en;
-		pdata->ir_vdd_onoff = irda_vdd_onoff;
-		if(gpio_request(pdata->irda_wake_en, "IRDA Wakeup EN Pin"))
-			pr_err("%s IRDA Wakeup EN GPIO Request failed\n",__func__);
-
-		gpio_tlmm_config(GPIO_CFG(pdata->irda_wake_en,  0, GPIO_CFG_OUTPUT,
-			GPIO_CFG_NO_PULL, GPIO_CFG_2MA), GPIO_CFG_DISABLE);
-
-
-		gpio_tlmm_config(GPIO_CFG(pdata->irda_led_en,  0, GPIO_CFG_OUTPUT,
-                        GPIO_CFG_NO_PULL, GPIO_CFG_2MA), GPIO_CFG_ENABLE);
-
-		gpio_request(pdata->irda_led_en, "irda_led_en");
-		gpio_direction_output(pdata->irda_led_en, 1);
-
-		if (gpio_request(pdata->irda_irq_gpio, "ira_irq"))
-			pr_err("%s IRDA LED IRQ  GPIO Request failed\n",__func__);
-		gpio_direction_input(pdata->irda_irq_gpio);
-	} else
-		pdata = client->dev.platform_data;
-
-	if (!pdata)
-		return -EINVAL;
 
 	if (!i2c_check_functionality(adapter, I2C_FUNC_I2C))
 		return -EIO;
@@ -597,33 +466,22 @@ static int __devinit ir_remocon_probe(struct i2c_client *client,
 	}
 
 	data->client = client;
-	if (client->dev.of_node)
-	{
-		data->pdata = pdata;
-	}else
-		data->pdata = client->dev.platform_data;
+	data->pdata = client->dev.platform_data;
 
 	mutex_init(&data->mutex);
 	data->count = 2;
 	data->on_off = 0;
 
-
-	vled_ic = regulator_get(&client->dev, "vled_ic_1.9v");
-       	if (IS_ERR(vled_ic)) {
-       		pr_err("%s could not get regulator vled_ic_1.9v\n",__func__);
-		goto err_free_mem;
-       }
-
 	i2c_set_clientdata(client, data);
 
-	for (i = 0; i < 2; i++) {
+	for (i = 0; i < 6; i++) {
 		if (download_pass == 1)
 			break;
 		irda_fw_update(data);
 	}
-
-//	irda_read_device_info(data);
-
+/*
+	irda_read_device_info(data);
+*/
 	ir_remocon_dev = device_create(sec_class, NULL, 0, data, "sec_ir");
 
 	if (IS_ERR(ir_remocon_dev))
@@ -661,9 +519,9 @@ static int ir_remocon_suspend(struct device *dev)
 	struct i2c_client *client = to_i2c_client(dev);
 	struct ir_remocon_data *data = i2c_get_clientdata(client);
 
-	data->pdata->ir_vdd_onoff(dev,0);
+	data->pdata->ir_vdd_onoff(0);
 	data->on_off = 0;
-	data->pdata->ir_wake_en(data->pdata,0);
+	data->pdata->ir_wake_en(0);
 
 	return 0;
 }
@@ -693,7 +551,7 @@ static void ir_remocon_late_resume(struct early_suspend *h)
 #if defined(CONFIG_PM) && !defined(CONFIG_HAS_EARLYSUSPEND)
 static const struct dev_pm_ops ir_remocon_pm_ops = {
 	.suspend	= ir_remocon_suspend,
-	.resume		= ir_remocon_resume,
+	.resume	= ir_remocon_resume,
 };
 #endif
 
@@ -703,8 +561,6 @@ static int __devexit ir_remocon_remove(struct i2c_client *client)
 
 	mutex_destroy(&data->mutex);
 	i2c_set_clientdata(client, NULL);
-        regulator_disable(vled_ic);
-        regulator_put(vled_ic);
 	kfree(data);
 	return 0;
 }
@@ -715,22 +571,14 @@ static const struct i2c_device_id mc96_id[] = {
 };
 MODULE_DEVICE_TABLE(i2c, mc96_id);
 
-static struct of_device_id mc96_i2c_match_table[] = {
-	{ .compatible = "mc96fr332,i2c",},
-	{},
-};
-MODULE_DEVICE_TABLE(of, mc96_i2c_match_table);
-
 static struct i2c_driver mc96_i2c_driver = {
 	.driver = {
 		.name = "mc96",
-		.owner = THIS_MODULE,
-		.of_match_table = mc96_i2c_match_table,
 	},
 	.probe = ir_remocon_probe,
 	.remove = __devexit_p(ir_remocon_remove),
 #if defined(CONFIG_PM) && !defined(CONFIG_HAS_EARLYSUSPEND)
-	//.pm	= &ir_remocon_pm_ops,
+	.pm	= &ir_remocon_pm_ops,
 #endif
 
 	.id_table = mc96_id,

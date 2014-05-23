@@ -1,24 +1,21 @@
 #
-# SEC_FPGA
+# BARCODE_EMUL
 #
-menu "SEC_FPGA and IRDA FPGA"
-
-config SEC_FPGA
-	tristate "this feature allows Barcode emulator"
-	default n
+menuconfig BARCODE_EMUL
+	bool "Barcode emulator driver only for the barcode emulation"
 	help
-	  This is a driver for barcode emulator driver based on Lattice chip.
-	  Lattice FPGA can support Barcode emulator.
-	  To compile this driver as a module, choose M here.
+	  This option doesn't affect the kernel.
+
 	  If unsure, say N.
 
-config IR_REMOCON_FPGA
-	tristate "this feature allows IR LED"
-	depends on SEC_FPGA
-	default n
-	help
-	  This is a driver for IR LED driver based on Lattice chip.
-	  Lattice FPGA can support IR LED.
-	  To compile this driver as a module, choose M here.
-	  If unsure, say N.
-endmenu
+choice
+	prompt "Control type"
+	depends on BARCODE_EMUL
+	default BARCODE_EMUL_ICE4
+
+config BARCODE_EMUL_ICE4
+	bool "ICE4 barcode emulator"
+
+endchoice
+
+

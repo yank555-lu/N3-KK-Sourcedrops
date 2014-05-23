@@ -23,8 +23,6 @@
 #include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/seq_file.h>
-#include <linux/cryptouser.h>
-#include <net/netlink.h>
 
 #include <crypto/scatterwalk.h>
 
@@ -393,35 +391,6 @@ static int crypto_init_ablkcipher_ops(struct crypto_tfm *tfm, u32 type,
 	return 0;
 }
 
-#ifdef CONFIG_NET
-static int crypto_ablkcipher_report(struct sk_buff *skb, struct crypto_alg *alg)
-{
-	struct crypto_report_blkcipher rblkcipher;
-
-	snprintf(rblkcipher.type, CRYPTO_MAX_ALG_NAME, "%s", "ablkcipher");
-	snprintf(rblkcipher.geniv, CRYPTO_MAX_ALG_NAME, "%s",
-		 alg->cra_ablkcipher.geniv ?: "<default>");
-
-	rblkcipher.blocksize = alg->cra_blocksize;
-	rblkcipher.min_keysize = alg->cra_ablkcipher.min_keysize;
-	rblkcipher.max_keysize = alg->cra_ablkcipher.max_keysize;
-	rblkcipher.ivsize = alg->cra_ablkcipher.ivsize;
-
-	NLA_PUT(skb, CRYPTOCFGA_REPORT_BLKCIPHER,
-		sizeof(struct crypto_report_blkcipher), &rblkcipher);
-
-	return 0;
-
-nla_put_failure:
-	return -EMSGSIZE;
-}
-#else
-static int crypto_ablkcipher_report(struct sk_buff *skb, struct crypto_alg *alg)
-{
-	return -ENOSYS;
-}
-#endif
-
 static void crypto_ablkcipher_show(struct seq_file *m, struct crypto_alg *alg)
 	__attribute__ ((unused));
 static void crypto_ablkcipher_show(struct seq_file *m, struct crypto_alg *alg)
@@ -444,7 +413,6 @@ const struct crypto_type crypto_ablkcipher_type = {
 #ifdef CONFIG_PROC_FS
 	.show = crypto_ablkcipher_show,
 #endif
-	.report = crypto_ablkcipher_report,
 };
 EXPORT_SYMBOL_GPL(crypto_ablkcipher_type);
 
@@ -474,35 +442,6 @@ static int crypto_init_givcipher_ops(struct crypto_tfm *tfm, u32 type,
 	return 0;
 }
 
-#ifdef CONFIG_NET
-static int crypto_givcipher_report(struct sk_buff *skb, struct crypto_alg *alg)
-{
-	struct crypto_report_blkcipher rblkcipher;
-
-	snprintf(rblkcipher.type, CRYPTO_MAX_ALG_NAME, "%s", "givcipher");
-	snprintf(rblkcipher.geniv, CRYPTO_MAX_ALG_NAME, "%s",
-		 alg->cra_ablkcipher.geniv ?: "<built-in>");
-
-	rblkcipher.blocksize = alg->cra_blocksize;
-	rblkcipher.min_keysize = alg->cra_ablkcipher.min_keysize;
-	rblkcipher.max_keysize = alg->cra_ablkcipher.max_keysize;
-	rblkcipher.ivsize = alg->cra_ablkcipher.ivsize;
-
-	NLA_PUT(skb, CRYPTOCFGA_REPORT_BLKCIPHER,
-		sizeof(struct crypto_report_blkcipher), &rblkcipher);
-
-	return 0;
-
-nla_put_failure:
-	return -EMSGSIZE;
-}
-#else
-static int crypto_givcipher_report(struct sk_buff *skb, struct crypto_alg *alg)
-{
-	return -ENOSYS;
-}
-#endif
-
 static void crypto_givcipher_show(struct seq_file *m, struct crypto_alg *alg)
 	__attribute__ ((unused));
 static void crypto_givcipher_show(struct seq_file *m, struct crypto_alg *alg)
@@ -525,7 +464,6 @@ const struct crypto_type crypto_givcipher_type = {
 #ifdef CONFIG_PROC_FS
 	.show = crypto_givcipher_show,
 #endif
-	.report = crypto_givcipher_report,
 };
 EXPORT_SYMBOL_GPL(crypto_givcipher_type);
 
@@ -623,7 +561,8 @@ out:
 	return err;
 }
 
-struct crypto_alg *crypto_lookup_skcipher(const char *name, u32 type, u32 mask)
+static struct crypto_alg *crypto_lookup_skcipher(const char *name, u32 type,
+						 u32 mask)
 {
 	struct crypto_alg *alg;
 
@@ -661,7 +600,6 @@ struct crypto_alg *crypto_lookup_skcipher(const char *name, u32 type, u32 mask)
 
 	return ERR_PTR(crypto_givcipher_default(alg, type, mask));
 }
-EXPORT_SYMBOL_GPL(crypto_lookup_skcipher);
 
 int crypto_grab_skcipher(struct crypto_skcipher_spawn *spawn, const char *name,
 			 u32 type, u32 mask)

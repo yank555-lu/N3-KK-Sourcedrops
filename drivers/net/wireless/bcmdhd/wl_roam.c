@@ -21,7 +21,7 @@
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
  *
- * $Id: wl_roam.c 334946 2012-05-24 20:38:00Z $
+ * $Id: wl_roam.c 425343 2013-09-23 23:04:47Z $
  */
 
 #include <typedefs.h>
@@ -306,12 +306,12 @@ static void add_roamcache_channel(channel_list_t *channels, chanspec_t ch)
 		ch & WL_CHANSPEC_CHAN_MASK, ch));
 }
 
-void update_roam_cache(struct wl_priv *wl, int ioctl_ver)
+void update_roam_cache(struct bcm_cfg80211 *cfg, int ioctl_ver)
 {
 	int error, i, prev_channels;
 	channel_list_t channel_list;
 	char iobuf[WLC_IOCTL_SMLEN];
-	struct net_device *dev = wl_to_prmry_ndev(wl);
+	struct net_device *dev = bcmcfg_to_prmry_ndev(cfg);
 	wlc_ssid_t ssid;
 
 #if defined(CUSTOMER_HW4) && defined(WES_SUPPORT)
@@ -321,7 +321,7 @@ void update_roam_cache(struct wl_priv *wl, int ioctl_ver)
 	}
 #endif
 
-	if (!wl_get_drv_status(wl, CONNECTED, dev)) {
+	if (!wl_get_drv_status(cfg, CONNECTED, dev)) {
 		WL_DBG(("Not associated\n"));
 		return;
 	}

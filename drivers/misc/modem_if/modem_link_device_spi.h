@@ -20,7 +20,6 @@
 #include <linux/timer.h>
 #include <linux/platform_data/modem.h>
 
-#include <linux/semaphore.h>
 
 #define SPI_TIMER_TX_WAIT_TIME 60 /* ms */
 #define SPI_TIMER_RX_WAIT_TIME 500 /* ms */
@@ -136,16 +135,21 @@ struct spi_data_packet_header {
 	unsigned long more:1;
 };
 
+struct link_pm_data {
+	struct miscdevice miscdev;
+	struct spi_link_device *spild;
+
+	struct notifier_block pm_notifier;
+};
+
 struct spi_link_device {
 	struct link_device ld;
 
-	/* Link to SPI control functions dependent on each platform */
-	int max_ipc_dev;
-
 	/* Wakelock for SPI device */
 	struct wake_lock spi_wake_lock;
+
 	/* Workqueue for modem bin transfers */
-	struct workqueue_struct *spi_modem_wq;
+	struct workqueue_struct *ipc_spi_wq;
 
 	/* SPI state */
 	int spi_state;
@@ -159,9 +163,11 @@ struct spi_link_device {
 	unsigned int gpio_ipc_srdy;
 	unsigned int gpio_ipc_sub_mrdy;
 	unsigned int gpio_ipc_sub_srdy;
-	unsigned int gpio_cp_dump_int;
 
 	unsigned int gpio_modem_bin_srdy;
+
+	unsigned int gpio_ap_cp_int1;
+	unsigned int gpio_ap_cp_int2;
 
 	/* value for checking spi pin status */
 	unsigned long mrdy_low_time_save;
@@ -179,13 +185,14 @@ struct spi_link_device {
 
 	struct io_device    *iod[MAX_DEV_FORMAT];
 	struct sk_buff_head  skb_rxq[MAX_DEV_FORMAT];
-	struct sk_buff_head *skb_txq[MAX_IPC_DEV];
+
+	/* LINK PM DEVICE DATA */
+	struct link_pm_data *link_pm_data;
 
 	/* Multi-purpose miscellaneous buffer */
 	u8 *buff;
 	u8 *sync_buff;
 
-	struct completion ril_init;
 	struct semaphore srdy_sem;
 
 	int send_modem_spi;
@@ -207,27 +214,12 @@ struct spi_v_buff {
 	void __iomem *mmio;
 };
 
-struct spi_platform_data {
-	const char *name;
-	unsigned gpio_ipc_mrdy;
-	unsigned gpio_ipc_srdy;
-	unsigned gpio_ipc_sub_mrdy;
-	unsigned gpio_ipc_sub_srdy;
-	unsigned gpio_cp_dump_int;
-
-	void (*cfg_gpio)(void);
-};
-
-extern int sec_bootmode;
+extern unsigned int lpcharge;
 extern int get_console_suspended(void);
-void spi_work(struct work_struct *work);
+static void spi_work(struct work_struct *work);
 
 /* Send SPRD main image through SPI */
 #define SPRD_BLOCK_SIZE	32768
-//#define SPRD_BLOCK_SIZE (16*8)  // Temp. 
-//#define SPRD_BLOCK_SIZE (2048)
-
-
 
 enum image_type {
 	MODEM_MAIN,
@@ -257,17 +249,12 @@ struct sprd_image_buf {
 };
 
 /* CRC */
-#define CRC_16_POLYNOMIAL		0x1021
-#define CRC_16_L_POLYNOMIAL	0x8408
-#define CRC_16_L_SEED	0xFFFF
-#define CRC_TAB_SIZE	256	/* 2^CRC_TAB_BITS	   */
 #define CRC_16_L_OK	0x0
 #define HDLC_FLAG	0x7E
 #define HDLC_ESCAPE	0x7D
-#define HDLC_ESCAPE_MASK	0x20
+#define HDLC_ESCAPE_MASK 0x20
 #define CRC_CHECK_SIZE	0x02
 
-#if 1 //test dklee data swap
 #define M_32_SWAP(a) {					\
 		u32 _tmp;				\
 		_tmp = a;					\
@@ -283,8 +270,5 @@ struct sprd_image_buf {
 		((u8 *)&a)[0] = ((u8 *)&_tmp)[1];	\
 		((u8 *)&a)[1] = ((u8 *)&_tmp)[0];	\
 		}
-#else
-#define M_32_SWAP(a)
-#define M_16_SWAP(a)
-#endif
+
 #endif

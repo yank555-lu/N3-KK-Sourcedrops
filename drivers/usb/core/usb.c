@@ -41,13 +41,16 @@
 #include <linux/scatterlist.h>
 #include <linux/mm.h>
 #include <linux/dma-mapping.h>
+#if defined(CONFIG_LINK_DEVICE_HSIC) || defined(CONFIG_MDM_HSIC_PM)
+#include <linux/usb/quirks.h>
+#endif
 
 #include "usb.h"
 
 
 const char *usbcore_name = "usbcore";
 
-static bool nousb;	/* Disable USB when built into kernel image */
+static int nousb;	/* Disable USB when built into kernel image */
 
 #ifdef	CONFIG_USB_SUSPEND
 static int usb_autosuspend_delay = 2;		/* Default delay value,
@@ -225,7 +228,6 @@ static void usb_release_dev(struct device *dev)
 	hcd = bus_to_hcd(udev->bus);
 
 	usb_destroy_configuration(udev);
-	usb_release_bos_descriptor(udev);
 	usb_put_hcd(hcd);
 	kfree(udev->product);
 	kfree(udev->manufacturer);
@@ -274,7 +276,7 @@ static int usb_dev_prepare(struct device *dev)
 static void usb_dev_complete(struct device *dev)
 {
 	/* Currently used only for rebinding interfaces */
-	usb_resume_complete(dev);
+	usb_resume(dev, PMSG_ON);	/* FIXME: change to PMSG_COMPLETE */
 }
 
 static int usb_dev_suspend(struct device *dev)
@@ -284,6 +286,12 @@ static int usb_dev_suspend(struct device *dev)
 
 static int usb_dev_resume(struct device *dev)
 {
+#if defined(CONFIG_LINK_DEVICE_HSIC) || defined(CONFIG_MDM_HSIC_PM)
+	struct usb_device	*udev = to_usb_device(dev);
+
+	if (udev && udev->quirks & USB_QUIRK_NO_DPM_RESUME)
+		return 0;
+#endif
 	return usb_resume(dev, PMSG_RESUME);
 }
 
@@ -310,8 +318,10 @@ static int usb_dev_restore(struct device *dev)
 static const struct dev_pm_ops usb_device_pm_ops = {
 	.prepare =	usb_dev_prepare,
 	.complete =	usb_dev_complete,
+#if !defined(CONFIG_MACH_P4NOTE) && !defined(CONFIG_MACH_SP7160LTE)
 	.suspend =	usb_dev_suspend,
 	.resume =	usb_dev_resume,
+#endif
 	.freeze =	usb_dev_freeze,
 	.thaw =		usb_dev_thaw,
 	.poweroff =	usb_dev_poweroff,
@@ -326,7 +336,7 @@ static const struct dev_pm_ops usb_device_pm_ops = {
 #endif	/* CONFIG_PM */
 
 
-static char *usb_devnode(struct device *dev, umode_t *mode)
+static char *usb_devnode(struct device *dev, mode_t *mode)
 {
 	struct usb_device *usb_dev;
 
@@ -451,11 +461,8 @@ struct usb_device *usb_alloc_dev(struct usb_device *parent,
 	INIT_LIST_HEAD(&dev->filelist);
 
 #ifdef	CONFIG_PM
-	if (usb_hcd->driver->set_autosuspend_delay)
-		usb_hcd->driver->set_autosuspend_delay(dev);
-	else
-		pm_runtime_set_autosuspend_delay(&dev->dev,
-				usb_autosuspend_delay * 1000);
+	pm_runtime_set_autosuspend_delay(&dev->dev,
+			usb_autosuspend_delay * 1000);
 	dev->connect_time = jiffies;
 	dev->active_duration = -jiffies;
 #endif

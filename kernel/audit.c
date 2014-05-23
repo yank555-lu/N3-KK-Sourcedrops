@@ -43,9 +43,9 @@
 
 #include <linux/init.h>
 #include <asm/types.h>
-#include <linux/atomic.h>
+#include <asm/atomic.h>
 #include <linux/mm.h>
-#include <linux/export.h>
+#include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/err.h>
 #include <linux/kthread.h>
@@ -64,8 +64,8 @@
 
 #include "audit.h"
 
-#ifdef CONFIG_PROC_AVC
-#include <linux/proc_avc.h>
+#ifdef CONFIG_SEC_AVC_LOG
+#include <mach/sec_debug.h>
 #endif
 
 /* No auditing will take place until audit_initialized == AUDIT_INITIALIZED.
@@ -185,7 +185,7 @@ void audit_panic(const char *message)
 	case AUDIT_FAIL_SILENT:
 		break;
 	case AUDIT_FAIL_PRINTK:
-			printk(KERN_ERR "audit: %s\n", message);
+		printk(KERN_ERR "audit: %s\n", message);
 		break;
 	case AUDIT_FAIL_PANIC:
 		/* test audit_pid since printk is always losey, why bother? */
@@ -386,17 +386,17 @@ static void audit_hold_skb(struct sk_buff *skb)
 static void audit_printk_skb(struct sk_buff *skb)
 {
 	struct nlmsghdr *nlh = nlmsg_hdr(skb);
-#ifdef CONFIG_PROC_AVC
 	char *data = NLMSG_DATA(nlh);
-#endif
 
 	if (nlh->nlmsg_type != AUDIT_EOE) {
-#ifdef CONFIG_PROC_AVC
-		sec_avc_log("%s\n", data);
+#ifdef CONFIG_SEC_AVC_LOG
+		sec_debug_avc_log("type=%d %s\n", nlh->nlmsg_type, data);
 #endif
 	}
-
+#ifndef CONFIG_SAMSUNG_PRODUCT_SHIP
+	// Do not hold skb on SHIP Binary, only print to avc msg.
 	audit_hold_skb(skb);
+#endif
 }
 
 static void kauditd_send_skb(struct sk_buff *skb)
@@ -413,17 +413,17 @@ static void kauditd_send_skb(struct sk_buff *skb)
 		/* we might get lucky and get this in the next auditd */
 		audit_hold_skb(skb);
 	} else {
-#ifdef CONFIG_PROC_AVC
+#ifdef CONFIG_SEC_AVC_LOG
 		struct nlmsghdr *nlh = nlmsg_hdr(skb);
 		char *data = NLMSG_DATA(nlh);
 	
 		if (nlh->nlmsg_type != AUDIT_EOE) {
-			sec_avc_log("%s\n", data);
+			sec_debug_avc_log("%s\n", data);
 		}
 #endif
 		/* drop the extra reference if sent ok */
 		consume_skb(skb);
-}
+	}
 }
 
 static int kauditd_thread(void *dummy)
@@ -643,7 +643,7 @@ static int audit_log_common_recv_msg(struct audit_buffer **ab, u16 msg_type,
 	}
 
 	*ab = audit_log_start(NULL, GFP_KERNEL, msg_type);
-	audit_log_format(*ab, "pid=%d uid=%u auid=%u ses=%u",
+	audit_log_format(*ab, "user pid=%d uid=%u auid=%u ses=%u",
 			 pid, uid, auid, ses);
 	if (sid) {
 		rc = security_secid_to_secctx(sid, &ctx, &len);
@@ -1272,13 +1272,12 @@ static void audit_log_vformat(struct audit_buffer *ab, const char *fmt,
 		avail = audit_expand(ab,
 			max_t(unsigned, AUDIT_BUFSIZ, 1+len-avail));
 		if (!avail)
-			goto out_va_end;
+			goto out;
 		len = vsnprintf(skb_tail_pointer(skb), avail, fmt, args2);
 	}
+	va_end(args2);
 	if (len > 0)
 		skb_put(skb, len);
-out_va_end:
-	va_end(args2);
 out:
 	return;
 }
@@ -1430,12 +1429,12 @@ void audit_log_untrustedstring(struct audit_buffer *ab, const char *string)
 
 /* This is a helper-function to print the escaped d_path */
 void audit_log_d_path(struct audit_buffer *ab, const char *prefix,
-		      const struct path *path)
+		      struct path *path)
 {
 	char *p, *pathname;
 
 	if (prefix)
-		audit_log_format(ab, "%s", prefix);
+		audit_log_format(ab, " %s", prefix);
 
 	/* We will allow 11 spaces for ' (deleted)' to be appended */
 	pathname = kmalloc(PATH_MAX+11, ab->gfp_mask);
